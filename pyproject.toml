@@ -1,0 +1,29 @@
+[tool.poetry]
+name = "mtt"
+version = "0.1.0"
+description = "Multi target tracking."
+authors = ["Damian Owerko <damowerko@gmail.com>"]
+readme = "README.md"
+
+[[tool.poetry.source]]
+name = "pytorch"
+url = "https://eternalphane.github.io/pytorch-pypi/"
+
+[tool.poetry.dependencies]
+python = "^3.9,<3.11"
+numpy = "^1.22.1"
+matplotlib = "^3.5.1"
+PySide6 = "^6.2.2.1"
+torch = "1.10.1+cu113"
+pytorch-lightning = "^1.5.9"
+torchinfo = "^1.6.3"
+
+
+[tool.poetry.group.dev.dependencies]
+black = "^21.12-beta.0"
+jupyter = "^1.0.0"
+ipympl = "^0.8.7"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
