@@ -23,6 +23,7 @@ torchinfo = "^1.6.3"
 black = "^21.12-beta.0"
 jupyter = "^1.0.0"
 ipympl = "^0.8.7"
+guildai = "^0.7.5"
 
 [build-system]
 requires = ["poetry-core"]
