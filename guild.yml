@@ -1,0 +1,20 @@
+- operations:
+    train:
+      main: scripts/train
+      output-scalars: off
+      flags-dest: args
+      flags-import: all
+      sourcecode:
+        select:
+          - "*.py"
+          - include:
+              dir: scripts
+          - include:
+              dir: src
+  resources:
+    data:
+      - file: data/
+        target-type: link
+    logs:
+      - file: logs/
+        target-type: link
