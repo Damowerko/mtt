@@ -1,12 +1,11 @@
 import torch
-import torch.nn as nn
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.utilities.argparse import add_argparse_args
+
 import numpy as np
-from typing import List
-import matplotlib.pyplot as plt
-from mtt.models import ConvEncoderDecoder
+from mtt.models import Conv3dEncoderDecoder
 from mtt.sensor import Sensor
 from mtt.simulator import Simulator
 from mtt.data import OnlineDataset
@@ -30,7 +29,7 @@ def train(params):
     dataset = OnlineDataset(
         n_steps=params.n_steps,
         length=params.length,
-        img_size=256,
+        img_size=params.img_size,
         init_simulator=init_simulator,
         init_sensor=init_sensor,
     )
@@ -45,7 +44,7 @@ def train(params):
         batch_size=1,
         pin_memory=True,
     )
-    model = ConvEncoderDecoder()
+    model = Conv3dEncoderDecoder(img_size=params.img_size, n_encoder=params.n_encoder)
 
     logger = (
         TensorBoardLogger(save_dir="./", name="tensorboard", version="")
@@ -72,7 +71,12 @@ def train(params):
         max_epochs=params.max_epochs,
         default_root_dir=".",
     )
-    trainer.fit(model, train_loader, val_loader, ckpt_path="./checkpoints/last.ckpt")
+
+    # check if checkpoint exists
+    ckpt_path = "./checkpoints/last.ckpt"
+    ckpt_path = ckpt_path if os.path.exists(ckpt_path) else None
+
+    trainer.fit(model, train_loader, val_loader, ckpt_path=ckpt_path)
 
 
 if __name__ == "__main__":
@@ -82,10 +86,13 @@ if __name__ == "__main__":
     parser.add_argument("--log", type=int, default=1)
 
     # data arguments
-    group = parser.add_argument_group("data")
+    group = parser.add_argument_group("Data")
     group.add_argument("--batch_size", type=int, default=16)
     group.add_argument("--n_steps", type=int, default=100)
-    group.add_argument("--length", type=int, default=20)
+
+    # model arguments
+    group = parser.add_argument_group("Model")
+    Conv3dEncoderDecoder.add_model_specific_args(group)
 
     # trainer arguments
     group = parser.add_argument_group("Trainer")
