@@ -54,8 +54,8 @@ class OnlineDataset(IterableDataset):
 
             if len(inptut_imgs) == self.length:
                 out = [
-                    torch.stack(tuple(inptut_imgs))[None, ...],
-                    torch.stack(tuple(output_imgs))[None, ...],
+                    torch.stack(tuple(inptut_imgs)),
+                    torch.stack(tuple(output_imgs)),
                 ]
                 if not self.image_only:
                     out.append(tuple(target_positions))

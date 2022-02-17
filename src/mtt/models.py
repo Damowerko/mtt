@@ -29,9 +29,21 @@ def conv_transpose_output(shape, kernel_size, stride, padding, dilation):
 
 
 class EncoderDecoder(pl.LightningModule):
-    def __init__(self, loss="l2", **kwargs):
+    @classmethod
+    def add_model_specific_args(cls, group):
+        for base in cls.__bases__:
+            if hasattr(base, "add_model_specific_args"):
+                group = base.add_model_specific_args(group)
+        args = get_init_arguments_and_types(cls)
+        for name, types, default in args:
+            if types[0] not in (int, float, str, bool):
+                continue
+            group.add_argument(f"--{name}", type=types[0], default=default)
+        return group
+
+    def __init__(self, loss: str="l2", output: str="all", **kwargs):
         super().__init__()
-        self.save_hyperparameters(ignore="kwargs")
+        self.save_hyperparameters()
 
     def forward(self, x):
         raise NotImplementedError
@@ -57,7 +69,7 @@ class EncoderDecoder(pl.LightningModule):
         loss = self.loss(output_img, target_img)
         self.log("val/loss", loss)
         self.log("hp_metric", loss)  # this is for tensorboard
-        return input_img[0, 0, -1], target_img[0, 0, -1], output_img[0, 0, -1]
+        return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
     def validation_epoch_end(self, outputs):
         n_rows = min(5, len(outputs))
@@ -75,7 +87,7 @@ class EncoderDecoder(pl.LightningModule):
         self.logger.experiment.add_figure("images", fig, self.current_epoch)
 
 
-class Conv3dCoder(EncoderDecoder):
+class Conv2dCoder(EncoderDecoder):
     def __init__(
         self,
         lr: float = 1e-3,
@@ -85,32 +97,31 @@ class Conv3dCoder(EncoderDecoder):
         n_encoder: int = 3,
         n_hidden: int = 2,
         n_channels: int = 64,
-        kernel_time: int = 5,
-        kernel_space: int = 9,
-        dilation_time: int = 1,
-        dilation_space: int = 1,
+        kernel_size: int = 9,
+        dilation: int = 1,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self.save_hyperparameters(ignore="kwargs")
+        self.save_hyperparameters()
+
+        padding = ((kernel_size - 1) // 2,)*2
+        kernel_size = (kernel_size, kernel_size)
+        stride = (2, 2)
+        dilation = (dilation, dilation)
 
         self.input_shape = (length, img_size, img_size)
-        kernel_size = (kernel_time, kernel_space, kernel_space)
-        stride = (1, 2, 2)
-        padding = (kernel_time // 2, kernel_space // 2, kernel_space // 2)
-        dilation = (dilation_time, dilation_space, dilation_space)
 
         # initialize the encoder and decoder layers
         # the input layer has one channel
-        encoder_channels = [1] + [n_channels] * n_encoder
-        encoder_shapes = [self.input_shape]
+        encoder_channels = [length] + [n_channels] * n_encoder
+        encoder_shapes = [(img_size, img_size)]
         encoder_layers = []
         for i in range(len(encoder_channels) - 1):
             encoder_shapes.append(
                 conv_output(encoder_shapes[-1], kernel_size, stride, padding, dilation)
             )
             encoder_layers += [
-                nn.Conv3d(
+                nn.Conv2d(
                     encoder_channels[i],
                     encoder_channels[i + 1],
                     kernel_size,
@@ -136,7 +147,7 @@ class Conv3dCoder(EncoderDecoder):
             output_padding = np.asarray(desired_shape) - np.asarray(actual_shape)
 
             decoder_layers += [
-                nn.ConvTranspose3d(
+                nn.ConvTranspose2d(
                     decoder_channels[i],
                     decoder_channels[i + 1],
                     kernel_size,
@@ -159,15 +170,6 @@ class Conv3dCoder(EncoderDecoder):
                 nn.ReLU(True),
             ]
         self.hidden = nn.Sequential(*self.hiden_layers)
-
-    @staticmethod
-    def add_model_specific_args(group):
-        args = get_init_arguments_and_types(Conv3dCoder)
-        for name, types, default in args:
-            if types[0] not in (int, float, str, bool):
-                continue
-            group.add_argument(f"--{name}", type=types[0], default=default)
-        return group
 
     def forward(self, x):
         x = self.encoder(x)
