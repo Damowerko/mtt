@@ -2,10 +2,9 @@ import torch
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
-from pytorch_lightning.utilities.argparse import add_argparse_args
 
 import numpy as np
-from mtt.models import Conv3dEncoderDecoder
+from mtt.models import Conv3dCoder
 from mtt.sensor import Sensor
 from mtt.simulator import Simulator
 from mtt.data import OnlineDataset
@@ -44,7 +43,7 @@ def train(params):
         batch_size=1,
         pin_memory=True,
     )
-    model = Conv3dEncoderDecoder(img_size=params.img_size, n_encoder=params.n_encoder)
+    model = Conv3dCoder(**vars(params))
 
     logger = (
         TensorBoardLogger(save_dir="./", name="tensorboard", version="")
@@ -92,7 +91,7 @@ if __name__ == "__main__":
 
     # model arguments
     group = parser.add_argument_group("Model")
-    Conv3dEncoderDecoder.add_model_specific_args(group)
+    Conv3dCoder.add_model_specific_args(group)
 
     # trainer arguments
     group = parser.add_argument_group("Trainer")

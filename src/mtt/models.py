@@ -1,5 +1,6 @@
 from black import out
 import pytorch_lightning as pl
+from pytorch_lightning.utilities.argparse import get_init_arguments_and_types
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,26 +29,35 @@ def conv_transpose_output(shape, kernel_size, stride, padding, dilation):
 
 
 class EncoderDecoder(pl.LightningModule):
-    def __init__(self):
+    def __init__(self, loss="l2", **kwargs):
         super().__init__()
+        self.save_hyperparameters(ignore="kwargs")
 
     def forward(self, x):
         raise NotImplementedError
 
+    def loss(self, output_img, target_img):
+        if self.hparams.loss == "l2":
+            return F.mse_loss(output_img, target_img)
+        elif self.hparams.loss == "l1":
+            return F.l1_loss(output_img, target_img)
+        else:
+            raise ValueError(f"Unknown loss {self.hparams.loss}")
+
     def training_step(self, batch, batch_idx):
         input_img, target_img, *_ = batch
         output_img = self(input_img)
-        mse = F.mse_loss(output_img, target_img)
-        self.log("train/loss", mse)
-        return mse
+        loss = self.loss(output_img, target_img)
+        self.log("train/loss", loss)
+        return loss
 
     def validation_step(self, batch, batch_idx):
         input_img, target_img, *_ = batch
         output_img = self(input_img)
-        mse = F.mse_loss(output_img, target_img)
-        self.log("val/loss", mse)
-        self.log("hp_metric", mse)  # this is for tensorboard
-        return (input_img[0, 0, -1], target_img[0, 0, -1], output_img[0, 0, -1])
+        loss = self.loss(output_img, target_img)
+        self.log("val/loss", loss)
+        self.log("hp_metric", loss)  # this is for tensorboard
+        return input_img[0, 0, -1], target_img[0, 0, -1], output_img[0, 0, -1]
 
     def validation_epoch_end(self, outputs):
         n_rows = min(5, len(outputs))
@@ -65,33 +75,30 @@ class EncoderDecoder(pl.LightningModule):
         self.logger.experiment.add_figure("images", fig, self.current_epoch)
 
 
-class Conv3dEncoderDecoder(EncoderDecoder):
+class Conv3dCoder(EncoderDecoder):
     def __init__(
         self,
-        lr=1e-3,
-        weight_decay=0,
-        length=20,
-        img_size=128,
-        n_encoder=3,
-        n_hidden=2,
-        n_channels=128,
-        kernel_time=3,
-        kernel_spatial=3,
-        stride_time=1,
-        stride_spatial=2,
-        padding_time=1,
-        padding_spatial=0,
-        dilation_time=1,
-        dilation_spatial=1,
+        lr: float = 1e-3,
+        weight_decay: int = 0,
+        length: int = 20,
+        img_size: int = 128,
+        n_encoder: int = 3,
+        n_hidden: int = 2,
+        n_channels: int = 64,
+        kernel_time: int = 5,
+        kernel_space: int = 9,
+        dilation_time: int = 1,
+        dilation_space: int = 1,
+        **kwargs,
     ):
-        super().__init__()
-        self.save_hyperparameters()
+        super().__init__(**kwargs)
+        self.save_hyperparameters(ignore="kwargs")
 
         self.input_shape = (length, img_size, img_size)
-        kernel_size = (kernel_time, kernel_spatial, kernel_spatial)
-        stride = (stride_time, stride_spatial, stride_spatial)
-        padding = (padding_time, padding_spatial, padding_spatial)
-        dilation = (dilation_time, dilation_spatial, dilation_spatial)
+        kernel_size = (kernel_time, kernel_space, kernel_space)
+        stride = (1, 2, 2)
+        padding = (kernel_time // 2, kernel_space // 2, kernel_space // 2)
+        dilation = (dilation_time, dilation_space, dilation_space)
 
         # initialize the encoder and decoder layers
         # the input layer has one channel
@@ -111,7 +118,7 @@ class Conv3dEncoderDecoder(EncoderDecoder):
                     padding,
                     dilation,
                 ),
-                nn.LeakyReLU(True),
+                nn.ReLU(True),
             ]
         self.encoder = nn.Sequential(*encoder_layers)
 
@@ -138,7 +145,7 @@ class Conv3dEncoderDecoder(EncoderDecoder):
                     output_padding,
                     dilation=dilation,
                 ),
-                nn.LeakyReLU(True) if i < len(decoder_channels) - 2 else nn.Identity(),
+                nn.ReLU(True) if i < len(decoder_channels) - 2 else nn.Identity(),
             ]
         self.decoder = nn.Sequential(*decoder_layers)
 
@@ -155,21 +162,11 @@ class Conv3dEncoderDecoder(EncoderDecoder):
 
     @staticmethod
     def add_model_specific_args(group):
-        group.add_argument("--lr", type=float, default=1e-3)
-        group.add_argument("--weight_decay", type=float, default=0)
-        group.add_argument("--length", type=int, default=20)
-        group.add_argument("--img_size", type=int, default=128)
-        group.add_argument("--n_encoder", type=int, default=3)
-        group.add_argument("--n_hidden", type=int, default=1)
-        group.add_argument("--n_channels", type=int, default=64)
-        group.add_argument("--kernel_time", type=int, default=5)
-        group.add_argument("--kernel_spatial", type=int, default=9)
-        group.add_argument("--stride_time", type=int, default=1)
-        group.add_argument("--stride_spatial", type=int, default=2)
-        group.add_argument("--padding_time", type=int, default=2)
-        group.add_argument("--padding_spatial", type=int, default=0)
-        group.add_argument("--dilation_time", type=int, default=1)
-        group.add_argument("--dilation_spatial", type=int, default=1)
+        args = get_init_arguments_and_types(Conv3dCoder)
+        for name, types, default in args:
+            if types[0] not in (int, float, str, bool):
+                continue
+            group.add_argument(f"--{name}", type=types[0], default=default)
         return group
 
     def forward(self, x):
