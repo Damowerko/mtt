@@ -31,7 +31,7 @@ def conv_transpose_output(shape, kernel_size, stride, padding, dilation):
 class EncoderDecoder(pl.LightningModule):
     @classmethod
     def add_model_specific_args(cls, group):
-        for base in cls.__bases__:
+            for base in cls.__bases__:
             if hasattr(base, "add_model_specific_args"):
                 group = base.add_model_specific_args(group)
         args = get_init_arguments_and_types(cls)
@@ -41,14 +41,26 @@ class EncoderDecoder(pl.LightningModule):
             group.add_argument(f"--{name}", type=types[0], default=default)
         return group
 
-    def __init__(self, loss: str="l2", output: str="all", **kwargs):
+    def __init__(
+        self,
+        loss: str = "l2",
+        img_size: int = 128,
+        input_length: int = 20,
+        output_length: int = 20,
+        lr: float = 1e-3,
+        weight_decay: int = 0,
+        **kwargs,
+    ):
         super().__init__()
         self.save_hyperparameters()
+        self.input_shape = (input_length, img_size, img_size)
+        self.output_shape = (output_length, img_size, img_size)
 
     def forward(self, x):
         raise NotImplementedError
 
     def loss(self, output_img, target_img):
+        target_img = target_img[0, -self.hparams.output_length - 1 :]
         if self.hparams.loss == "l2":
             return F.mse_loss(output_img, target_img)
         elif self.hparams.loss == "l1":
@@ -68,7 +80,7 @@ class EncoderDecoder(pl.LightningModule):
         output_img = self(input_img)
         loss = self.loss(output_img, target_img)
         self.log("val/loss", loss)
-        self.log("hp_metric", loss)  # this is for tensorboard
+        self.log("hp_metric", loss)  # this is for tensorboard TODO: test if works
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
     def validation_epoch_end(self, outputs):
@@ -86,14 +98,17 @@ class EncoderDecoder(pl.LightningModule):
         plt.subplots_adjust(wspace=0, hspace=0)
         self.logger.experiment.add_figure("images", fig, self.current_epoch)
 
+    def configure_optimizers(self):
+        return torch.optim.AdamW(
+            self.parameters(),
+            lr=self.hparams.lr,
+            weight_decay=self.hparams.weight_decay,
+        )
+
 
 class Conv2dCoder(EncoderDecoder):
     def __init__(
         self,
-        lr: float = 1e-3,
-        weight_decay: int = 0,
-        length: int = 20,
-        img_size: int = 128,
         n_encoder: int = 3,
         n_hidden: int = 2,
         n_channels: int = 64,
@@ -104,17 +119,15 @@ class Conv2dCoder(EncoderDecoder):
         super().__init__(**kwargs)
         self.save_hyperparameters()
 
-        padding = ((kernel_size - 1) // 2,)*2
+        padding = ((kernel_size - 1) // 2,) * 2
         kernel_size = (kernel_size, kernel_size)
         stride = (2, 2)
         dilation = (dilation, dilation)
 
-        self.input_shape = (length, img_size, img_size)
-
         # initialize the encoder and decoder layers
         # the input layer has one channel
-        encoder_channels = [length] + [n_channels] * n_encoder
-        encoder_shapes = [(img_size, img_size)]
+        encoder_channels = [self.input_shape[0]] + [n_channels] * n_encoder
+        encoder_shapes = [self.input_shape[1:]]
         encoder_layers = []
         for i in range(len(encoder_channels) - 1):
             encoder_shapes.append(
@@ -135,7 +148,7 @@ class Conv2dCoder(EncoderDecoder):
 
         # the decoder layers are analogous to the encoder layers but in reverse
         decoder_shapes = encoder_shapes[::-1]
-        decoder_channels = encoder_channels[::-1]
+        decoder_channels = [n_channels] * n_encoder + [self.output_shape[0]]
         decoder_layers = []
         for i in range(len(decoder_channels) - 1):
             # specify output_padding to resolve output shape ambiguity when stride > 1
@@ -179,9 +192,92 @@ class Conv2dCoder(EncoderDecoder):
         x = self.decoder(x)
         return x
 
-    def configure_optimizers(self):
-        return torch.optim.AdamW(
-            self.parameters(),
-            lr=self.hparams.lr,
-            weight_decay=self.hparams.weight_decay,
-        )
+
+class Conv3dCoder(EncoderDecoder):
+    def __init__(
+        self,
+        n_encoder: int = 3,
+        n_hidden: int = 2,
+        n_channels: int = 8,
+        kernel_time: int = 3,
+        kernel_space: int = 9,
+        dilation_space: int = 1,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.save_hyperparameters()
+
+        padding = (kernel_time,) + ((kernel_space - 1) // 2,) * 2
+        kernel_size = (kernel_time, kernel_space, kernel_space)
+        stride = (1, 2, 2)
+        dilation = (1, dilation_space, dilation_space)
+
+        # initialize the encoder and decoder layers
+        # the input layer has one channel
+        encoder_channels = [1] + [n_channels] * n_encoder
+        encoder_shapes = [self.input_shape[1:]]
+        encoder_layers = []
+        for i in range(len(encoder_channels) - 1):
+            encoder_shapes.append(
+                conv_output(encoder_shapes[-1], kernel_size, stride, padding, dilation)
+            )
+            encoder_layers += [
+                nn.Conv3d(
+                    encoder_channels[i],
+                    encoder_channels[i + 1],
+                    kernel_size,
+                    stride,
+                    padding,
+                    dilation,
+                ),
+                nn.ReLU(True),
+            ]
+        self.encoder = nn.Sequential(*encoder_layers)
+
+        # the decoder layers are analogous to the encoder layers but in reverse
+        decoder_shapes = encoder_shapes[::-1]
+        decoder_channels = [n_channels] * n_encoder + [1]
+        decoder_layers = []
+        for i in range(len(decoder_channels) - 1):
+            # specify output_padding to resolve output shape ambiguity when stride > 1
+            input_shape = decoder_shapes[i]
+            desired_shape = decoder_shapes[i + 1]
+            actual_shape = conv_transpose_output(
+                input_shape, kernel_size, stride, padding, dilation
+            )
+            output_padding = np.asarray(desired_shape) - np.asarray(actual_shape)
+
+            decoder_layers += [
+                nn.ConvTranspose3d(
+                    decoder_channels[i],
+                    decoder_channels[i + 1],
+                    kernel_size,
+                    stride,
+                    padding,
+                    output_padding,
+                    dilation=dilation,
+                ),
+                nn.ReLU(True) if i < len(decoder_channels) - 2 else nn.Identity(),
+            ]
+        self.decoder = nn.Sequential(*decoder_layers)
+
+        # initialize the hidden layers
+        self.embedding_shape = encoder_shapes[-1]
+        self.embedding_size = np.prod(self.embedding_shape)
+        self.hiden_layers = []
+        for i in range(n_hidden):
+            self.hiden_layers += [
+                nn.Linear(self.embedding_size, self.embedding_size),
+                nn.ReLU(True),
+            ]
+        self.hidden = nn.Sequential(*self.hiden_layers)
+
+    def forward(self, x):
+        x = x.view((-1, 1) + self.input_shape).tranpose(1, 2)
+        x = self.encoder(x)
+        x = x.view(-1, self.embedding_size)
+        x = self.hidden(x)
+        x = x.view((-1, self.hparams.n_channels) + self.embedding_shape)
+        x = self.decoder(x)
+        x = x.view((-1,) + self.output_shape)
+        return x

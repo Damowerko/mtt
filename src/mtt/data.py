@@ -17,6 +17,7 @@ class OnlineDataset(IterableDataset):
         init_simulator: Callable[..., Simulator] = Simulator(),
         init_sensor: Callable[..., Sensor] = Sensor(),
         image_only=True,
+        **kwargs,
     ):
         super().__init__()
         self.n_steps = n_steps

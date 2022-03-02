@@ -1,17 +1,25 @@
+from typing import Dict
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-import numpy as np
-from mtt.models import Conv2dCoder
+from mtt.models import EncoderDecoder, Conv2dCoder, Conv3dCoder
 from mtt.sensor import Sensor
 from mtt.simulator import Simulator
 from mtt.data import OnlineDataset
 import argparse
 import os
 
-rng = np.random.default_rng()
+
+def get_model_cls(model_type):
+    models: Dict[str, EncoderDecoder] = {
+        "Conv2dCoder": Conv2dCoder,
+        "Conv3dCoder": Conv3dCoder,
+    }
+    if model_type not in models:
+        raise ValueError(f"Unknown model type: {model_type}")
+    return models[model_type]
 
 
 def train(params):
@@ -26,11 +34,10 @@ def train(params):
     )
     init_sensor = lambda: Sensor(position=(1, 1), noise=(0.2, 0.1), p_detection=0.9)
     dataset = OnlineDataset(
-        n_steps=params.n_steps,
-        length=params.length,
-        img_size=params.img_size,
+        length=params.input_length,
         init_simulator=init_simulator,
         init_sensor=init_sensor,
+        **vars(params),
     )
     train_loader = torch.utils.data.DataLoader(
         dataset,
@@ -43,7 +50,7 @@ def train(params):
         batch_size=1,
         pin_memory=True,
     )
-    model = Conv2dCoder(**vars(params))
+    model = get_model_cls(params.model)(**vars(params))
 
     logger = (
         TensorBoardLogger(save_dir="./", name="tensorboard", version="")
@@ -83,6 +90,13 @@ if __name__ == "__main__":
 
     # program arguments
     parser.add_argument("--log", type=int, default=1)
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="Conv2dCoder",
+        choices=["Conv2dCoder", "Conv3dCoder"],
+        help="For the Conv3dCoder you need to lower the n_channels to something like 8 or less.",
+    )
 
     # data arguments
     group = parser.add_argument_group("Data")
@@ -91,7 +105,8 @@ if __name__ == "__main__":
 
     # model arguments
     group = parser.add_argument_group("Model")
-    Conv2dCoder.add_model_specific_args(group)
+    # params = parser.parse_known_args()[0]
+    group = get_model_cls("Conv2dCoder").add_model_specific_args(group)
 
     # trainer arguments
     group = parser.add_argument_group("Trainer")
