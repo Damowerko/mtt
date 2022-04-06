@@ -24,19 +24,23 @@ def get_model_cls(model_type):
 
 def train(params):
     init_simulator = lambda: Simulator(
-        max_targets=10,
+        width=1000,
         p_initial=4,
-        p_birth=2,
+        p_birth=params.p_birth,
         p_survival=0.95,
-        sigma_motion=0.1,
-        sigma_initial_state=(3.0, 1.0, 1.0),
-        max_distance=1e6,
+        p_clutter=params.p_clutter,
+        p_detection=0.95,
+        sigma_motion=5.0,
+        sigma_initial_state=(50.0, 50.0, 2.0),
+        n_sensors=1,
+        noise_range=10.0,
+        noise_bearing=0.1,
+        dt=0.1,
     )
-    init_sensor = lambda: Sensor(position=(1, 1), noise=(0.2, 0.1), p_detection=0.9)
     dataset = OnlineDataset(
         length=params.input_length,
         init_simulator=init_simulator,
-        init_sensor=init_sensor,
+        sigma_position=0.01,
         **vars(params),
     )
     train_loader = torch.utils.data.DataLoader(
@@ -44,11 +48,13 @@ def train(params):
         batch_size=params.batch_size,
         num_workers=params.batch_size,
         pin_memory=True,
+        collate_fn=dataset.collate_fn,
     )
     val_loader = torch.utils.data.DataLoader(
         dataset,
         batch_size=1,
         pin_memory=True,
+        collate_fn=dataset.collate_fn,
     )
     model = get_model_cls(params.model)(**vars(params))
 
@@ -76,6 +82,7 @@ def train(params):
         gpus=params.gpus,
         max_epochs=params.max_epochs,
         default_root_dir=".",
+        check_val_every_n_epoch=10,
     )
 
     # check if checkpoint exists
@@ -102,6 +109,8 @@ if __name__ == "__main__":
     group = parser.add_argument_group("Data")
     group.add_argument("--batch_size", type=int, default=16)
     group.add_argument("--n_steps", type=int, default=100)
+    group.add_argument("--p_clutter", type=float, default=1e-4)
+    group.add_argument("--p_birth", type=float, default=2)
 
     # model arguments
     group = parser.add_argument_group("Model")

@@ -31,7 +31,7 @@ def conv_transpose_output(shape, kernel_size, stride, padding, dilation):
 class EncoderDecoder(pl.LightningModule):
     @classmethod
     def add_model_specific_args(cls, group):
-            for base in cls.__bases__:
+        for base in cls.__bases__:
             if hasattr(base, "add_model_specific_args"):
                 group = base.add_model_specific_args(group)
         args = get_init_arguments_and_types(cls)
@@ -60,7 +60,7 @@ class EncoderDecoder(pl.LightningModule):
         raise NotImplementedError
 
     def loss(self, output_img, target_img):
-        target_img = target_img[0, -self.hparams.output_length - 1 :]
+        # target_img = target_img[0, -self.hparams.output_length - 1 :]
         if self.hparams.loss == "l2":
             return F.mse_loss(output_img, target_img)
         elif self.hparams.loss == "l1":
@@ -71,6 +71,7 @@ class EncoderDecoder(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         input_img, target_img, *_ = batch
         output_img = self(input_img)
+        assert output_img.shape == target_img.shape
         loss = self.loss(output_img, target_img)
         self.log("train/loss", loss)
         return loss
@@ -78,13 +79,13 @@ class EncoderDecoder(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         input_img, target_img, *_ = batch
         output_img = self(input_img)
+        assert output_img.shape == target_img.shape
         loss = self.loss(output_img, target_img)
-        self.log("val/loss", loss)
-        self.log("hp_metric", loss)  # this is for tensorboard TODO: test if works
+        self.log("val/loss", loss, prog_bar=True)
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
     def validation_epoch_end(self, outputs):
-        n_rows = min(5, len(outputs))
+        n_rows = min(1, len(outputs))
         idx = rng.choice(len(outputs), size=n_rows, replace=False)
         fig, ax = plt.subplots(
             n_rows, 3, figsize=(9, 3 * n_rows), sharex=True, sharey=True, squeeze=False
@@ -112,6 +113,7 @@ class Conv2dCoder(EncoderDecoder):
         n_encoder: int = 3,
         n_hidden: int = 2,
         n_channels: int = 64,
+        n_channels_hidden: int = 128,
         kernel_size: int = 9,
         dilation: int = 1,
         **kwargs,
@@ -174,21 +176,20 @@ class Conv2dCoder(EncoderDecoder):
         self.decoder = nn.Sequential(*decoder_layers)
 
         # initialize the hidden layers
-        self.embedding_shape = encoder_shapes[-1]
-        self.embedding_size = np.prod(self.embedding_shape)
-        self.hiden_layers = []
-        for i in range(n_hidden):
-            self.hiden_layers += [
-                nn.Linear(self.embedding_size, self.embedding_size),
+        hidden_channels = [n_channels] + [n_channels_hidden] * n_hidden + [n_channels]
+        hidden_layers = []
+        for i in range(n_hidden+1):
+            hidden_layers += [
+                nn.Conv2d(hidden_channels[i], hidden_channels[i+1], 1),
                 nn.ReLU(True),
             ]
-        self.hidden = nn.Sequential(*self.hiden_layers)
+        self.hidden = nn.Sequential(*hidden_layers)
 
     def forward(self, x):
         x = self.encoder(x)
-        x = x.view(-1, self.embedding_size)
+        # x = x.view(-1, self.embedding_size)
         x = self.hidden(x)
-        x = x.view((-1, self.hparams.n_channels) + self.embedding_shape)
+        # x = x.view((-1, self.hparams.n_channels) + self.embedding_shape)
         x = self.decoder(x)
         return x
 

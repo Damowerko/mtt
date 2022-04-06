@@ -10,21 +10,24 @@ rng = np.random.default_rng()
 
 if __name__ == "__main__":
     init_simulator = lambda: Simulator(
-        max_targets=10,
-        p_initial=4,
-        p_birth=2,
-        p_survival=0.95,
-        sigma_motion=0.1,
-        sigma_initial_state=(3.0, 1.0, 1.0),
-        max_distance=1e6,
+            width=1000,
+            p_initial=4,
+            p_birth=1,
+            p_survival=0.95,
+            p_clutter=1e-4,
+            p_detection=0.95,
+            sigma_motion=0.5,
+            sigma_initial_state=(50.0, 40.0, 2.0),
+            n_sensors=1,
+            noise_range=10.0,
+            noise_bearing=0.1,
+            dt=0.1,
     )
-    init_sensor = lambda: Sensor(position=(0, 0), noise=(0.2, 0.1), p_detection=0.9)
     dataset = OnlineDataset(
         n_steps=100,
         length=20,
         img_size=256,
         init_simulator=init_simulator,
-        init_sensor=init_sensor,
     )
 
     plt.ion()
@@ -45,7 +48,16 @@ if __name__ == "__main__":
             pause = not pause
 
     fig.canvas.mpl_connect("key_press_event", key_press)
-    for sensor_img, target_img, target_position in dataset:
+    for sensor_imgs, position_imgs, info in dataset:
+        sensor_img = sensor_imgs[-1]
+        position_img = position_imgs[-1]
+        target_positions = info[-1]["target_positions"]
+        measurements = np.concatenate(info[-1]["measurements"])
+        clutter = np.concatenate(info[-1]["clutter"])
+
+        width = 1000
+        extent = (-width / 2, width / 2, -width / 2, width / 2)
+
         if not running:
             break
         # Animate the plot of target velocities over time.
@@ -54,8 +66,10 @@ if __name__ == "__main__":
             continue
         for i in range(len(ax)):
             ax[i].clear()
-            ax[i].plot(target_position[0][:, 0], target_position[0][:, 1], "r.")
-        ax[0].imshow(sensor_img[0], extent=(-10, 10, -10, 10), origin="lower")
-        ax[1].imshow(target_img[0], extent=(-10, 10, -10, 10), origin="lower")
-        ax[1].legend(["Target", "Sensor"])
+            ax[i].plot(*target_positions.T, "r.")
+            ax[i].plot(*measurements.T, "bx")
+            ax[i].plot(*clutter.T, "w1")
+        ax[0].imshow(sensor_img, extent=extent, origin="lower")
+        ax[1].imshow(position_img, extent=extent, origin="lower")
+        ax[1].legend(["Target", "Sensor", "Clutter"])
         plt.pause(0.1)

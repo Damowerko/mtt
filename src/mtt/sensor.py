@@ -19,7 +19,7 @@ class Sensor:
 
         Args:
             sensor_position: (2,) the position of the sensor.
-            noise: (2,) standard deviation of the noise for the range and bearing.
+            noise: (range, bearing) standard deviation of the noise.
         """
         self.position = np.asarray(position).reshape(2)
         self.noise = np.asarray(noise).reshape(2)
@@ -40,9 +40,7 @@ class Sensor:
 
         measurements = to_polar(target_positions - self.position[None, :])
         measurements += rng.normal(0, self.noise, size=measurements.shape)
-        # range should be positive
-        # measurements[:, 0] = np.fmax(0, measurements[:, 0])
-        return measurements
+        return to_cartesian(measurements) + self.position[None, :]
 
     def measurement_density(self, XY, target_measurements) -> np.ndarray:
         """
@@ -54,21 +52,20 @@ class Sensor:
         where |J| is the determinant of the Jacobian of g.
 
         Args:
-            XY: (...,2) x and y positions of where to sample at.
-            target_measurements: (N, 2) an ndarray of x,y measured target positions.
+            XY: (..., 2) x and y positions of where to sample at.
+            target_measurements: (..., 2) an ndarray of x,y measured target positions.
 
         Returns:
             The value of the density function at the given position.
         """
         Z = np.zeros(XY.shape[:-1])
-        XY = XY - self.position[None, None, :]
-        r = np.linalg.norm(XY, axis=2)
-        theta = np.arctan2(XY[..., 1], XY[..., 0])
-        for target_xy in target_measurements:
-            delta_r = np.abs(r - target_xy[0])
-            delta_theta = (theta - target_xy[1] + np.pi) % (2 * np.pi) - np.pi
+        rtheta = to_polar(XY - self.position)
+        target_rthetas = to_polar(target_measurements - self.position)
+        for target_r, target_theta in target_rthetas.reshape(-1, 2):
+            delta_r = np.abs(rtheta[..., 0] - target_r)
+            delta_theta = (rtheta[..., 1] - target_theta + np.pi) % (2 * np.pi) - np.pi
             Z += (
-                (1 / r)
+                1  # (1 / rtheta[..., 0])
                 * np.exp(
                     -0.5
                     * (
@@ -79,16 +76,3 @@ class Sensor:
                 / (np.sqrt(2 * np.pi) * self.noise[0] * self.noise[1])
             )
         return Z
-
-    def measurement_image(self, size: int, target_measurements: np.ndarray):
-        """
-        Image of the density function.
-
-        Args:
-            size int: the width and height of the image.
-            target_measurements: (N, 2,) the r,theta (range, bearing) for each target.
-        """
-        x = np.linspace(-10, 10, size)
-        y = np.linspace(-10, 10, size)
-        X, Y = np.meshgrid(x, y)
-        return self.measurement_density(np.stack((X, Y), axis=2), target_measurements)

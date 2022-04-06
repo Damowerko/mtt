@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import IterableDataset
-from collections import deque
+from collections import deque, namedtuple
 from typing import Callable
 
 from mtt.sensor import Sensor
@@ -15,8 +15,6 @@ class OnlineDataset(IterableDataset):
         img_size: int = 256,
         sigma_position=0.05,
         init_simulator: Callable[..., Simulator] = Simulator(),
-        init_sensor: Callable[..., Sensor] = Sensor(),
-        image_only=True,
         **kwargs,
     ):
         super().__init__()
@@ -25,40 +23,52 @@ class OnlineDataset(IterableDataset):
         self.img_size = img_size
         self.sigma_position = sigma_position
         self.init_simulator = init_simulator
-        self.init_sensor = init_sensor
-        self.image_only = image_only
 
     def __iter__(self):
         simulator = self.init_simulator()
-        sensor = self.init_sensor()
 
-        inptut_imgs = deque(maxlen=self.length)
-        output_imgs = deque(maxlen=self.length)
-        target_positions = deque(maxlen=self.length)
+        sensor_imgs = deque(maxlen=self.length)
+        position_imgs = deque(maxlen=self.length)
+        infos = deque(maxlen=self.length)
         for _ in range(self.n_steps + self.length):
-            inptut_imgs.append(
+            simulator.update()
+            target_positions = simulator.positions
+            measurements = simulator.measurements()
+            clutter = simulator.clutter()
+
+            sensor_imgs.append(
                 torch.Tensor(
-                    sensor.measurement_image(
-                        self.img_size, sensor.measure(simulator.positions)
-                    )
+                    simulator.measurement_image(self.img_size, measurements, clutter)
                 )
             )
-            output_imgs.append(
+            position_imgs.append(
                 torch.Tensor(
                     simulator.position_image(
                         self.img_size,
-                        self.sigma_position,
+                        self.sigma_position * simulator.width,
+                        target_positions,
                     )
                 )
             )
-            target_positions.append(simulator.positions)
+            infos.append(
+                dict(
+                    target_positions=target_positions,
+                    measurements=measurements,
+                    clutter=clutter,
+                )
+            )
 
-            if len(inptut_imgs) == self.length:
-                out = [
-                    torch.stack(tuple(inptut_imgs)),
-                    torch.stack(tuple(output_imgs)),
-                ]
-                if not self.image_only:
-                    out.append(tuple(target_positions))
-                yield out
-            simulator.update()
+            if len(sensor_imgs) == self.length:
+                yield (
+                    torch.stack(tuple(sensor_imgs)),
+                    torch.stack(tuple(position_imgs)),
+                    list(infos),
+                )
+
+    @staticmethod
+    def collate_fn(batch):
+        return (
+            torch.stack(tuple(sensor_imgs for sensor_imgs, _, _ in batch)),
+            torch.stack(tuple(positions_imgs for _, positions_imgs, _ in batch)),
+            list(infos for _, _, infos in batch),
+        )
