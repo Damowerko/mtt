@@ -1,5 +1,5 @@
 import numpy as np
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 
 from mtt.utils import to_cartesian, to_polar
 
@@ -25,7 +25,7 @@ class Sensor:
         self.noise = np.asarray(noise).reshape(2)
         self.p_detection = p_detection
 
-    def measure(self, target_positions: ArrayLike) -> np.ndarray:
+    def measure(self, target_positions: ArrayLike):
         """
         Simulate range and bearing measurements from a sensor at some position with noise.
 
@@ -35,6 +35,7 @@ class Sensor:
         Returns:
             (N,2) range and bearing measurements.
         """
+        target_positions = np.asarray(target_positions, np.float64)
         detected = rng.uniform(size=len(target_positions)) < self.p_detection
         target_positions = target_positions[detected]
 
@@ -42,7 +43,7 @@ class Sensor:
         measurements += rng.normal(0, self.noise, size=measurements.shape)
         return to_cartesian(measurements) + self.position[None, :]
 
-    def measurement_density(self, XY, target_measurements) -> np.ndarray:
+    def measurement_density(self, XY, target_measurements) -> NDArray[np.float64]:
         """
         Compute the density function of a measurement as some points.
 
@@ -65,8 +66,7 @@ class Sensor:
             delta_r = np.abs(rtheta[..., 0] - target_r)
             delta_theta = (rtheta[..., 1] - target_theta + np.pi) % (2 * np.pi) - np.pi
             Z += (
-                1  # (1 / rtheta[..., 0])
-                * np.exp(
+                np.exp(
                     -0.5
                     * (
                         delta_r ** 2 / self.noise[0] ** 2
@@ -74,5 +74,6 @@ class Sensor:
                     )
                 )
                 / (np.sqrt(2 * np.pi) * self.noise[0] * self.noise[1])
+                / rtheta[..., 0]
             )
         return Z

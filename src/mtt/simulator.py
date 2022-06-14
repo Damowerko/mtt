@@ -105,7 +105,7 @@ class Simulator:
             )
         return clutter
 
-    def position_image(self, size, sigma, target_positions):
+    def position_image(self, size, sigma, target_positions) -> np.ndarray:
         """
         Create an image of the targets at the given positions.
 
@@ -128,7 +128,7 @@ class Simulator:
         size: int,
         target_measurements: Optional[List[np.ndarray]] = None,
         clutter: Optional[List[np.ndarray]] = None,
-    ) -> np.ndarray:
+    ):
         """
         Image of the density function.
 
@@ -138,14 +138,14 @@ class Simulator:
             clutter: list of (N_i, 2) the x,y positions of the clutter.
         """
         if target_measurements is None:
-            target_measurements = [np.zeros(0, 2) for _ in range(len(self.sensors))]
+            target_measurements = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
         if clutter is None:
-            clutter = [np.zeros(0, 2) for _ in range(len(self.sensors))]
+            clutter = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
 
         x = np.linspace(-self.width / 2, self.width / 2, size)
         y = np.linspace(-self.width / 2, self.width / 2, size)
         XY = np.stack(np.meshgrid(x, y), axis=2)
-        return sum(
-            s.measurement_density(XY, np.concatenate((m, c), axis=0))
-            for s, m, c in zip(self.sensors, target_measurements, clutter)
-        )
+        Z = np.zeros((size, size))
+        for s, m, c in zip(self.sensors, target_measurements, clutter):
+            Z += s.measurement_density(XY, np.concatenate((m, c), axis=0))
+        return Z
