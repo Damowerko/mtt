@@ -17,7 +17,6 @@ PySide6 = "^6.2.2.1"
 torch = "1.10.1+cu113"
 pytorch-lightning = "^1.5.9"
 torchinfo = "^1.6.3"
-numba = "<=0.55"
 pandas = "<1.2"
 
 
