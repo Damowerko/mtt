@@ -1,9 +1,8 @@
 import torch
 from torch.utils.data import IterableDataset
-from collections import deque, namedtuple
+from collections import deque
 from typing import Callable
 
-from mtt.sensor import Sensor
 from mtt.simulator import Simulator
 
 
@@ -14,7 +13,7 @@ class OnlineDataset(IterableDataset):
         length: int = 20,
         img_size: int = 256,
         sigma_position=0.05,
-        init_simulator: Callable[..., Simulator] = Simulator(),
+        init_simulator: Callable[..., Simulator] = Simulator,
         **kwargs,
     ):
         super().__init__()
