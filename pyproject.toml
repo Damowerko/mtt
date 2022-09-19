@@ -18,6 +18,9 @@ torch = "1.10.1+cu113"
 pytorch-lightning = "^1.5.9"
 torchinfo = "^1.6.3"
 pandas = "<1.2"
+scikit-learn = "^1.1.2"
+imageio = "^2.21.3"
+av = "^9.2.0"
 
 
 [tool.poetry.group.dev.dependencies]
