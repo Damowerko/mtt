@@ -1,12 +1,12 @@
 from concurrent.futures import ProcessPoolExecutor
 from io import BytesIO
 
+import imageio.v3 as iio
 import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.animation import FuncAnimation
+
 from mtt.data import OnlineDataset
 from mtt.simulator import Simulator
-import imageio.v3 as iio
 
 rng = np.random.default_rng()
 
