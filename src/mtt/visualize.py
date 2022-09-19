@@ -49,7 +49,7 @@ if __name__ == "__main__":
         n_targets=10,
         target_lifetime=10,
         clutter_rate=10,
-        detection_rate=0.95,
+        p_detection=0.95,
         sigma_motion=0.5,
         sigma_initial_state=(1.0, 1.0),
         n_sensors=5,
