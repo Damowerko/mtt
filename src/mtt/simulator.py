@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Tuple, Union
 import numpy as np
 from mtt.target import Target
 from mtt.sensor import Sensor
@@ -9,44 +9,83 @@ rng = np.random.default_rng()
 class Simulator:
     def __init__(
         self,
-        width=1000,
-        p_initial=4,
-        p_birth=1e-3,
-        p_survival=0.95,
-        p_clutter=1e-5,
-        p_detection=0.95,
-        sigma_motion=0.5,
-        sigma_initial_state=(10.0, 1.0, 1.0),
-        n_sensors=1,
-        noise_range=10.0,
-        noise_bearing=0.1,
-        dt=0.1,
+        window: float = 1000,
+        width: Union[float, None] = None,
+        n_targets: float = 10,
+        target_lifetime: float = 10,
+        clutter_rate: float = 10,
+        p_detection: float = 0.95,
+        sigma_motion: float = 0.5,
+        sigma_initial_state: Tuple[float, float] = (1.0, 1.0),
+        n_sensors: float = 5,
+        sensor_range: float = 500,
+        noise_range: float = 10.0,
+        noise_bearing: float = 0.1,
+        dt: float = 0.1,
     ):
-        self.p_birth = p_birth
-        self.p_survival = p_survival
-        self.p_clutter = p_clutter
+        """
+        Args:
+            window: The width and height of the simulation window.
+            width: The width of the simulation area.
+            n_targets: The average number of targets per km^2.
+            n_sensors: The average number of sensors per km^22.
+            target_lifetime: The average lifetime of a target in seconds.
+            p_clutter: The clutter probability (poisson).
+            p_detection: The detection probability.
+            sigma_motion: The standard deviation of the target motion.
+            sigma_initial_state: The standard deviation of the initial target state.
+            sensor_range: The maximum range of the sensors.
+            noise_range: The standard deviation of the range measurement noise.
+            noise_bearing: The standard deviation of the bearing measurement noise.
+            dt: The time step.
+        """
+        self.window = window
+        self.width = window + 2 * sensor_range if width is None else width
+        self.area = self.width ** 2 / 1000 ** 2
+
+        self.survival_rate = 1 - 1 / target_lifetime
+        self.birth_rate = n_targets / target_lifetime
+        self.clutter_rate = clutter_rate
         self.p_detection = p_detection
+
         self.sigma_motion = sigma_motion
         self.sigma_initial_state = sigma_initial_state
-        self.width = width
-        self.noise_range = noise_range
-        self.noise_bearing = noise_bearing
         self.dt = dt
 
-        self.targets = [self.init_target() for i in range(rng.poisson(p_initial))]
-        # TODO: support multiple sensors
-        assert n_sensors == 1, "Only one sensor is supported for now."
-        self.sensors = [self.init_sensor()]
+        self.targets = [
+            self.init_target() for i in range(rng.poisson(n_targets * self.area))
+        ]
+        self.sensors = [
+            self.init_sensor(sensor_range, noise_range, noise_bearing)
+            for _ in range(rng.poisson(n_sensors * self.area))
+        ]
 
     def init_target(self) -> Target:
-        initial_state = np.random.normal(0, self.sigma_initial_state, size=(2, 3))
+        initial_state = np.concatenate(
+            (
+                rng.uniform(
+                    low=-self.width / 2,
+                    high=self.width / 2,
+                    size=(2, 1),
+                ),
+                rng.normal(scale=self.sigma_initial_state, size=(2, 2)),
+            ),
+            axis=1,
+        )
         return Target(initial_state, sigma=self.sigma_motion)
 
-    def init_sensor(self) -> Sensor:
+    def init_sensor(
+        self, range_max: float, noise_range: float, noise_bearing: float
+    ) -> Sensor:
         return Sensor(
-            position=(0, 0),
-            noise=(self.noise_range, self.noise_bearing),
+            position=rng.uniform(
+                low=-self.width / 2,
+                high=self.width / 2,
+                size=2,
+            ),
+            noise=(noise_range, noise_bearing),
             p_detection=self.p_detection,
+            range_max=range_max,
         )
 
     @property
@@ -74,13 +113,13 @@ class Simulator:
             target.update(self.dt)
 
         # Target survival
-        survival = rng.uniform(size=len(self.targets)) < self.p_survival ** self.dt
+        survival = rng.uniform(size=len(self.targets)) < self.survival_rate ** self.dt
         self.targets = [
             target for target, alive in zip(self.targets, survival) if alive
         ]
 
         # Target birth
-        n_birth = rng.poisson(self.p_birth * self.dt)
+        n_birth = rng.poisson(self.birth_rate * self.area * self.dt)
         self.targets += [self.init_target() for _ in range(n_birth)]
 
     def measurements(self):
@@ -94,7 +133,7 @@ class Simulator:
         for _ in self.sensors:
             # p_clutter is the total clutter probability across all sensors
             n_clutter = rng.poisson(
-                self.p_clutter * self.dt * self.width ** 2 / len(self.sensors)
+                self.clutter_rate * self.dt * self.area / len(self.sensors)
             )
             clutter.append(
                 rng.uniform(
@@ -115,8 +154,8 @@ class Simulator:
         """
         x = target_positions
         X, Y = np.meshgrid(
-            np.linspace(-self.width / 2, self.width / 2, size),
-            np.linspace(-self.width / 2, self.width / 2, size),
+            np.linspace(-self.window / 2, self.window / 2, size),
+            np.linspace(-self.window / 2, self.window / 2, size),
         )
         Z = np.zeros((size, size))
         for i in range(x.shape[0]):
@@ -142,8 +181,8 @@ class Simulator:
         if clutter is None:
             clutter = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
 
-        x = np.linspace(-self.width / 2, self.width / 2, size)
-        y = np.linspace(-self.width / 2, self.width / 2, size)
+        x = np.linspace(-self.window / 2, self.window / 2, size)
+        y = np.linspace(-self.window / 2, self.window / 2, size)
         XY = np.stack(np.meshgrid(x, y), axis=2)
         Z = np.zeros((size, size))
         for s, m, c in zip(self.sensors, target_measurements, clutter):
