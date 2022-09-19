@@ -1,15 +1,15 @@
-from typing import Dict
-import torch
-import pytorch_lightning as pl
-from pytorch_lightning.loggers import TensorBoardLogger
-from pytorch_lightning.callbacks import ModelCheckpoint
-
-from mtt.models import EncoderDecoder, Conv2dCoder, Conv3dCoder
-from mtt.sensor import Sensor
-from mtt.simulator import Simulator
-from mtt.data import OnlineDataset
 import argparse
 import os
+from typing import Dict
+
+import pytorch_lightning as pl
+import torch
+from mtt.data import OnlineDataset
+from mtt.models import Conv2dCoder, Conv3dCoder, EncoderDecoder
+from mtt.simulator import Simulator
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
+from torch.utils.data import DataLoader
 
 
 def get_model_cls(model_type):
@@ -25,16 +25,16 @@ def get_model_cls(model_type):
 def train(params):
     init_simulator = lambda: Simulator(
         width=1000,
-        p_initial=4,
-        p_birth=params.p_birth,
-        p_survival=0.95,
-        p_clutter=params.p_clutter,
+        n_targets=10,
+        target_lifetime=5,
+        clutter_rate=10,
         p_detection=0.95,
-        sigma_motion=5.0,
-        sigma_initial_state=(50.0, 50.0, 2.0),
-        n_sensors=1,
-        noise_range=10.0,
-        noise_bearing=0.1,
+        sigma_motion=0.5,
+        sigma_initial_state=(100.0, 10.0),
+        n_sensors=3,
+        sensor_range=500,
+        noise_range=20.0,
+        noise_bearing=0.2,
         dt=0.1,
     )
     dataset = OnlineDataset(
@@ -43,14 +43,14 @@ def train(params):
         sigma_position=0.01,
         **vars(params),
     )
-    train_loader = torch.utils.data.DataLoader(
+    train_loader = DataLoader(
         dataset,
         batch_size=params.batch_size,
         num_workers=params.batch_size,
         pin_memory=True,
         collate_fn=dataset.collate_fn,
     )
-    val_loader = torch.utils.data.DataLoader(
+    val_loader = DataLoader(
         dataset,
         batch_size=1,
         pin_memory=True,
@@ -109,8 +109,6 @@ if __name__ == "__main__":
     group = parser.add_argument_group("Data")
     group.add_argument("--batch_size", type=int, default=16)
     group.add_argument("--n_steps", type=int, default=100)
-    group.add_argument("--p_clutter", type=float, default=1e-4)
-    group.add_argument("--p_birth", type=float, default=2)
 
     # model arguments
     group = parser.add_argument_group("Model")

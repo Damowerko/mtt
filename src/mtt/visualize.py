@@ -47,11 +47,11 @@ if __name__ == "__main__":
     init_simulator = lambda: Simulator(
         width=1000,
         n_targets=10,
-        target_lifetime=10,
+        target_lifetime=5,
         clutter_rate=10,
         p_detection=0.95,
         sigma_motion=0.5,
-        sigma_initial_state=(1.0, 1.0),
+        sigma_initial_state=(10.0, 10.0),
         n_sensors=3,
         sensor_range=500,
         noise_range=20.0,

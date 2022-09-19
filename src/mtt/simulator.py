@@ -53,11 +53,12 @@ class Simulator:
         self.dt = dt
 
         self.targets = [
-            self.init_target() for i in range(rng.poisson(n_targets * self.area))
+            self.init_target()
+            for i in range(1 + rng.poisson(n_targets * self.area - 1))
         ]
         self.sensors = [
             self.init_sensor(sensor_range, noise_range, noise_bearing)
-            for _ in range(rng.poisson(n_sensors * self.area))
+            for _ in range(1 + rng.poisson(n_sensors * self.area - 1))
         ]
 
     def init_target(self) -> Target:
