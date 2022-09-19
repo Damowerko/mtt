@@ -132,9 +132,7 @@ class Simulator:
         clutter = []
         for _ in self.sensors:
             # p_clutter is the total clutter probability across all sensors
-            n_clutter = rng.poisson(
-                self.clutter_rate * self.dt * self.area / len(self.sensors)
-            )
+            n_clutter = rng.poisson(self.clutter_rate * self.area / len(self.sensors))
             clutter.append(
                 rng.uniform(
                     low=-self.width / 2,

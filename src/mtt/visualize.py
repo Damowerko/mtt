@@ -27,7 +27,7 @@ def plot_mtt(sensor_imgs, position_imgs, info):
         ax[i].plot(*target_positions.T, "r.")
         ax[i].plot(*sensor_positions.T, "b.")
         # ax[i].plot(*measurements.T, "bx")
-        # ax[i].plot(*clutter.T, "y1")
+        ax[i].plot(*clutter.T, "y1")
 
     ax[0].set_title("Sensor Image")
     ax[0].imshow(sensor_img, extent=extent, origin="lower", cmap="gray_r")
@@ -52,14 +52,14 @@ if __name__ == "__main__":
         p_detection=0.95,
         sigma_motion=0.5,
         sigma_initial_state=(1.0, 1.0),
-        n_sensors=5,
+        n_sensors=3,
         sensor_range=500,
-        noise_range=10.0,
-        noise_bearing=0.1,
+        noise_range=20.0,
+        noise_bearing=0.2,
         dt=0.1,
     )
     dataset = OnlineDataset(
-        n_steps=100,
+        n_steps=200,
         length=20,
         img_size=256,
         init_simulator=init_simulator,
@@ -74,8 +74,6 @@ if __name__ == "__main__":
         buf.seek(0)
         return iio.imread(buf)
 
-    with iio.imopen("figures/visualize.gif", "w") as f:
-        for d in data:
-            f.write(draw_frame(d))
-        # with ProcessPoolExecutor() as executor:
-        #     f.write(list(executor.map(draw_frame, data)))
+    with iio.imopen("figures/visualize.mp4", "w") as f:
+        with ProcessPoolExecutor() as executor:
+            f.write(list(executor.map(draw_frame, data)))
