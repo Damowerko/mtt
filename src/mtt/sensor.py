@@ -11,6 +11,7 @@ class Sensor:
         self,
         position: ArrayLike = (0, 0),
         noise: ArrayLike = (0.1, 0.1),
+        range_max: float = 500.0,
         p_detection: float = 0.9,
     ) -> None:
         """
@@ -24,19 +25,24 @@ class Sensor:
         self.position = np.asarray(position).reshape(2)
         self.noise = np.asarray(noise).reshape(2)
         self.p_detection = p_detection
+        self.range_max = range_max
 
     def measure(self, target_positions: ArrayLike):
         """
         Simulate range and bearing measurements from a sensor at some position with noise.
 
         Args:
-            target_positions: (N, 2) array of the position of the N targets.
+            target_positions: (N, 2) array of the position of the N targets.p
 
         Returns:
             (N,2) range and bearing measurements.
         """
         target_positions = np.asarray(target_positions, np.float64)
         detected = rng.uniform(size=len(target_positions)) < self.p_detection
+        detected &= (
+            np.linalg.norm(target_positions - self.position[None, :], axis=1)
+            < self.range_max
+        )
         target_positions = target_positions[detected]
 
         measurements = to_polar(target_positions - self.position[None, :])

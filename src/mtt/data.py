@@ -1,7 +1,9 @@
-import torch
-from torch.utils.data import IterableDataset
 from collections import deque
 from typing import Callable
+
+import numpy as np
+import torch
+from torch.utils.data import IterableDataset
 
 from mtt.simulator import Simulator
 
@@ -12,7 +14,7 @@ class OnlineDataset(IterableDataset):
         n_steps: int = 10000,
         length: int = 20,
         img_size: int = 256,
-        sigma_position=0.05,
+        sigma_position=0.01,
         init_simulator: Callable[..., Simulator] = Simulator,
         **kwargs,
     ):
@@ -32,6 +34,7 @@ class OnlineDataset(IterableDataset):
         for _ in range(self.n_steps + self.length):
             simulator.update()
             target_positions = simulator.positions
+            sensor_positions = np.stack([s.position for s in simulator.sensors], axis=0)
             measurements = simulator.measurements()
             clutter = simulator.clutter()
 
@@ -52,6 +55,7 @@ class OnlineDataset(IterableDataset):
             infos.append(
                 dict(
                     target_positions=target_positions,
+                    sensor_positions=sensor_positions,
                     measurements=measurements,
                     clutter=clutter,
                 )
