@@ -12,13 +12,14 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
 
-def get_model_cls(model_type):
-    models: Dict[str, EncoderDecoder] = {
+def get_model_cls(model_type) -> EncoderDecoder:
+    models = {
         "Conv2dCoder": Conv2dCoder,
         "Conv3dCoder": Conv3dCoder,
     }
     if model_type not in models:
         raise ValueError(f"Unknown model type: {model_type}")
+    assert issubclass(models[model_type], EncoderDecoder)
     return models[model_type]
 
 

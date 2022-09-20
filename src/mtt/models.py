@@ -1,4 +1,3 @@
-from black import out
 import pytorch_lightning as pl
 from pytorch_lightning.utilities.argparse import get_init_arguments_and_types
 import torch
@@ -33,7 +32,7 @@ class EncoderDecoder(pl.LightningModule):
     def add_model_specific_args(cls, group):
         for base in cls.__bases__:
             if hasattr(base, "add_model_specific_args"):
-                group = base.add_model_specific_args(group)
+                group = base.add_model_specific_args(group)  # type: ignore
         args = get_init_arguments_and_types(cls)
         for name, types, default in args:
             if types[0] not in (int, float, str, bool):
@@ -97,9 +96,12 @@ class EncoderDecoder(pl.LightningModule):
         )
         for i, j in enumerate(idx):
             input, target, output = outputs[j]
-            ax[i, 0].imshow(input.cpu().numpy())
-            ax[i, 1].imshow(target.cpu().numpy())
-            ax[i, 2].imshow(output.cpu().numpy())
+            assert isinstance(input, torch.Tensor)
+            assert isinstance(target, torch.Tensor)
+            assert isinstance(output, torch.Tensor)
+            ax[i, 0].imshow(input.cpu().numpy())  # type: ignore
+            ax[i, 1].imshow(target.cpu().numpy())  # type: ignore
+            ax[i, 2].imshow(output.cpu().numpy())  # type: ignore
         plt.setp(ax, xticks=[], yticks=[])
         plt.subplots_adjust(wspace=0, hspace=0)
         self.logger.experiment.add_figure("images", fig, self.current_epoch)  # type: ignore
@@ -134,9 +136,9 @@ class Conv2dCoder(EncoderDecoder):
         self.save_hyperparameters()
 
         padding = ((kernel_size - 1) // 2,) * 2
-        kernel_size = (kernel_size, kernel_size)
+        _kernel_size = (kernel_size, kernel_size)
         stride = (2, 2)
-        dilation = (dilation, dilation)
+        _dilation = (dilation, dilation)
 
         # initialize the encoder and decoder layers
         # the input layer has one channel
@@ -145,16 +147,18 @@ class Conv2dCoder(EncoderDecoder):
         encoder_layers = []
         for i in range(len(encoder_channels) - 1):
             encoder_shapes.append(
-                conv_output(encoder_shapes[-1], kernel_size, stride, padding, dilation)
+                conv_output(
+                    encoder_shapes[-1], _kernel_size, stride, padding, _dilation
+                )
             )
             encoder_layers += [
                 nn.Conv2d(
                     encoder_channels[i],
                     encoder_channels[i + 1],
-                    kernel_size,
+                    _kernel_size,
                     stride,
                     padding,
-                    dilation,
+                    _dilation,
                 ),
                 nn.ReLU(True),
             ]
@@ -166,12 +170,12 @@ class Conv2dCoder(EncoderDecoder):
         decoder_layers = []
         for i in range(len(decoder_channels) - 1):
             # specify output_padding to resolve output shape ambiguity when stride > 1
-            input_shape = decoder_shapes[i]
-            desired_shape = decoder_shapes[i + 1]
+            input_shape = np.asarray(decoder_shapes[i], dtype=np.int32)
+            desired_shape = np.asarray(decoder_shapes[i + 1], dtype=np.int32)
             actual_shape = conv_transpose_output(
                 input_shape, kernel_size, stride, padding, dilation
             )
-            output_padding = np.asarray(desired_shape) - np.asarray(actual_shape)
+            output_padding = desired_shape - actual_shape
 
             decoder_layers += [
                 nn.ConvTranspose2d(
@@ -180,7 +184,7 @@ class Conv2dCoder(EncoderDecoder):
                     kernel_size,
                     stride,
                     padding,
-                    output_padding,
+                    tuple(output_padding),
                     dilation=dilation,
                 ),
                 nn.ReLU(True) if i < len(decoder_channels) - 2 else nn.Identity(),
@@ -253,12 +257,12 @@ class Conv3dCoder(EncoderDecoder):
         decoder_layers = []
         for i in range(len(decoder_channels) - 1):
             # specify output_padding to resolve output shape ambiguity when stride > 1
-            input_shape = decoder_shapes[i]
-            desired_shape = decoder_shapes[i + 1]
+            input_shape = np.asarray(decoder_shapes[i], dtype=np.int32)
+            desired_shape = np.asarray(decoder_shapes[i + 1], dtype=np.int32)
             actual_shape = conv_transpose_output(
                 input_shape, kernel_size, stride, padding, dilation
             )
-            output_padding = np.asarray(desired_shape) - np.asarray(actual_shape)
+            output_padding = desired_shape - input_shape
 
             decoder_layers += [
                 nn.ConvTranspose3d(
@@ -267,7 +271,7 @@ class Conv3dCoder(EncoderDecoder):
                     kernel_size,
                     stride,
                     padding,
-                    output_padding,
+                    tuple(output_padding),
                     dilation=dilation,
                 ),
                 nn.ReLU(True) if i < len(decoder_channels) - 2 else nn.Identity(),
@@ -290,7 +294,7 @@ class Conv3dCoder(EncoderDecoder):
         x = self.encoder(x)
         x = x.view(-1, self.embedding_size)
         x = self.hidden(x)
-        x = x.view((-1, self.hparams.n_channels) + self.embedding_shape)
+        x = x.view((-1, self.n_channels) + self.embedding_shape)
         x = self.decoder(x)
         x = x.view((-1,) + self.output_shape)
         return x
