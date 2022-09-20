@@ -1,11 +1,12 @@
 import argparse
+from ast import arg
 import os
 
 import pytorch_lightning as pl
 from mtt.data import OnlineDataset
 from mtt.models import Conv2dCoder, Conv3dCoder, EncoderDecoder
 from mtt.simulator import Simulator
-from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
@@ -21,7 +22,7 @@ def get_model_cls(model_type) -> EncoderDecoder:
     return models[model_type]
 
 
-def train(params):
+def train(params: argparse.Namespace):
     init_simulator = lambda: Simulator(
         width=1000,
         n_targets=10,
@@ -72,6 +73,10 @@ def train(params):
             save_last=True,
             save_top_k=1,
         ),
+        EarlyStopping(
+            monitor="train/loss",
+            patience=params.patience,
+        ),
     ]
 
     trainer = pl.Trainer(
@@ -81,7 +86,7 @@ def train(params):
         gpus=params.gpus,
         max_epochs=params.max_epochs,
         default_root_dir=".",
-        check_val_every_n_epoch=10,
+        check_val_every_n_epoch=5,
     )
 
     # check if checkpoint exists
@@ -110,6 +115,7 @@ if __name__ == "__main__":
     group = parser.add_argument_group("Trainer")
     group.add_argument("--max_epochs", type=int, default=1000)
     group.add_argument("--gpus", type=int, default=1)
+    group.add_argument("--patience", type=int, default=4)
 
     params = parser.parse_args()
     train(params)
