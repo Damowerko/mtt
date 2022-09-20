@@ -3,11 +3,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.mixture import GaussianMixture
 
+from mtt.utils import gaussian
+
 
 rng = np.random.default_rng()
 
 
-def find_peaks(image: np.ndarray) -> Tuple(np.ndarray, np.ndarray):
+def find_peaks(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
     Find peaks in the `image` by fitting a GMM.
     To fit the mixture we randomly sample points in the image weighted by the intensity.
@@ -26,26 +28,6 @@ def find_peaks(image: np.ndarray) -> Tuple(np.ndarray, np.ndarray):
     means, covariances = fit_gmm(samples, n_components=3)
 
     return means, covariances
-
-
-def gaussian(XY, mu, cov):
-    """
-    Compute the Gaussian density function at some points.
-    Args:
-        XY: (..., 2) x and y positions of where to sample at.
-        mu: (2,) the mean of the Gaussian.
-        cov: (2,2) the covariance of the Gaussian.
-    Returns:
-        (...,) the density at the points.
-    """
-    XY = np.asarray(XY, np.float64)
-    mu = np.asarray(mu, np.float64)
-    cov = np.asarray(cov, np.float64)
-    det = np.linalg.det(cov)
-    inv = np.linalg.inv(cov)
-    gaussian = np.exp(-0.5 * np.sum((XY - mu) @ inv * (XY - mu), axis=-1))
-    norm = np.sqrt((2 * np.pi) ** 2 * det)
-    return gaussian / norm
 
 
 def sample_image(img: np.ndarray) -> np.ndarray:
