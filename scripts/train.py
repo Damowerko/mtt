@@ -1,9 +1,7 @@
 import argparse
 import os
-from typing import Dict
 
 import pytorch_lightning as pl
-import torch
 from mtt.data import OnlineDataset
 from mtt.models import Conv2dCoder, Conv3dCoder, EncoderDecoder
 from mtt.simulator import Simulator
