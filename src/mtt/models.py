@@ -43,30 +43,35 @@ class EncoderDecoder(pl.LightningModule):
 
     def __init__(
         self,
-        loss: str = "l2",
         img_size: int = 128,
         input_length: int = 20,
         output_length: int = 20,
+        loss_fn: str = "l2",
+        optimizer: str = "adamw",
         lr: float = 1e-3,
-        weight_decay: int = 0,
+        weight_decay: float = 0,
         **kwargs,
     ):
         super().__init__()
         self.save_hyperparameters()
         self.input_shape = (input_length, img_size, img_size)
         self.output_shape = (output_length, img_size, img_size)
+        self.loss_fn = loss_fn
+        self.optimizer = optimizer
+        self.lr = lr
+        self.weight_decay = weight_decay
 
     def forward(self, x):
         raise NotImplementedError
 
     def loss(self, output_img, target_img):
         # target_img = target_img[0, -self.hparams.output_length - 1 :]
-        if self.hparams.loss == "l2":
+        if self.loss_fn == "l2":
             return F.mse_loss(output_img, target_img)
-        elif self.hparams.loss == "l1":
+        elif self.loss_fn == "l1":
             return F.l1_loss(output_img, target_img)
         else:
-            raise ValueError(f"Unknown loss {self.hparams.loss}")
+            raise ValueError(f"Unknown loss {self.loss_fn}")
 
     def training_step(self, batch, batch_idx):
         input_img, target_img, *_ = batch
@@ -97,14 +102,21 @@ class EncoderDecoder(pl.LightningModule):
             ax[i, 2].imshow(output.cpu().numpy())
         plt.setp(ax, xticks=[], yticks=[])
         plt.subplots_adjust(wspace=0, hspace=0)
-        self.logger.experiment.add_figure("images", fig, self.current_epoch)
+        self.logger.experiment.add_figure("images", fig, self.current_epoch)  # type: ignore
 
     def configure_optimizers(self):
-        return torch.optim.AdamW(
-            self.parameters(),
-            lr=self.hparams.lr,
-            weight_decay=self.hparams.weight_decay,
-        )
+        if self.optimizer == "adamw":
+            return torch.optim.AdamW(
+                self.parameters(),
+                lr=self.lr,
+                weight_decay=self.weight_decay,
+            )
+        elif self.optimizer == "sgd":
+            return torch.optim.SGD(
+                self.parameters(),
+                lr=self.lr,
+                weight_decay=self.weight_decay,
+            )
 
 
 class Conv2dCoder(EncoderDecoder):
@@ -178,9 +190,9 @@ class Conv2dCoder(EncoderDecoder):
         # initialize the hidden layers
         hidden_channels = [n_channels] + [n_channels_hidden] * n_hidden + [n_channels]
         hidden_layers = []
-        for i in range(n_hidden+1):
+        for i in range(n_hidden + 1):
             hidden_layers += [
-                nn.Conv2d(hidden_channels[i], hidden_channels[i+1], 1),
+                nn.Conv2d(hidden_channels[i], hidden_channels[i + 1], 1),
                 nn.ReLU(True),
             ]
         self.hidden = nn.Sequential(*hidden_layers)

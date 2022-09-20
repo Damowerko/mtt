@@ -30,7 +30,7 @@ def train(params):
         clutter_rate=10,
         p_detection=0.95,
         sigma_motion=0.5,
-        sigma_initial_state=(100.0, 10.0),
+        sigma_initial_state=(10.0, 10.0),
         n_sensors=3,
         sensor_range=500,
         noise_range=20.0,
@@ -56,7 +56,7 @@ def train(params):
         pin_memory=True,
         collate_fn=dataset.collate_fn,
     )
-    model = get_model_cls(params.model)(**vars(params))
+    model = Conv2dCoder(**vars(params))
 
     logger = (
         TensorBoardLogger(save_dir="./", name="tensorboard", version="")
@@ -97,13 +97,6 @@ if __name__ == "__main__":
 
     # program arguments
     parser.add_argument("--log", type=int, default=1)
-    parser.add_argument(
-        "--model",
-        type=str,
-        default="Conv2dCoder",
-        choices=["Conv2dCoder", "Conv3dCoder"],
-        help="For the Conv3dCoder you need to lower the n_channels to something like 8 or less.",
-    )
 
     # data arguments
     group = parser.add_argument_group("Data")
@@ -112,8 +105,7 @@ if __name__ == "__main__":
 
     # model arguments
     group = parser.add_argument_group("Model")
-    # params = parser.parse_known_args()[0]
-    group = get_model_cls("Conv2dCoder").add_model_specific_args(group)
+    group = Conv2dCoder.add_model_specific_args(group)
 
     # trainer arguments
     group = parser.add_argument_group("Trainer")
