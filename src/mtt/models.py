@@ -125,6 +125,7 @@ class EncoderDecoder(pl.LightningModule):
             self.logger.experiment.add_figure("images", fig, self.current_epoch)  # type: ignore
 
     def ospa(self, batch):
+        # average ospa over batch
         input_img, target_img, info = batch
         output_img = self(input_img)
         assert output_img.shape == target_img.shape
