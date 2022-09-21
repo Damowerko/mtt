@@ -14,10 +14,18 @@ class OnlineDataset(IterableDataset):
         n_steps: int = 10000,
         length: int = 20,
         img_size: int = 256,
-        sigma_position=0.01,
+        sigma_position: float = 10.0,
         init_simulator: Callable[..., Simulator] = Simulator,
         **kwargs,
     ):
+        """
+        Args:
+            n_steps: Number of steps to simulate.
+            length: Number of time steps to include in each sample.
+            img_size: Size of the image to generate.
+            sigma_position: Standard deviation of the Gaussian used to generate the target image.
+            init_simulator: Function used to initialize the simulator.
+        """
         super().__init__()
         self.n_steps = n_steps
         self.length = length
@@ -47,7 +55,7 @@ class OnlineDataset(IterableDataset):
                 torch.Tensor(
                     simulator.position_image(
                         self.img_size,
-                        self.sigma_position * simulator.width,
+                        self.sigma_position,
                         target_positions,
                     )
                 )
