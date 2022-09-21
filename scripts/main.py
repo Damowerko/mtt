@@ -40,7 +40,7 @@ def get_dataset(params: argparse.Namespace) -> OnlineDataset:
     return OnlineDataset(
         length=params.input_length,
         init_simulator=init_simulator,
-        sigma_position=0.01,
+        sigma_position=10,
         **vars(params),
     )
 
