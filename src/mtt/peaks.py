@@ -21,6 +21,10 @@ def find_peaks(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         means: (n_peaks, 2) the mean of each peak.
         covariances: (n_peaks, 2, 2) the covariance of each peak.
     """
+
+    # assuming number of peaks is approximately the sum of all pixels
+    n_components = int(np.round(img.sum()))
+
     # set negative pixels to zero
     image = np.maximum(image, 0)
 
@@ -28,7 +32,7 @@ def find_peaks(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     samples = sample_image(image)
 
     # Fit gaussian mixture model to find peaks.
-    means, covariances = fit_gmm(samples, n_components=3)
+    means, covariances = fit_gmm(samples, n_components=n_components)
 
     return means, covariances
 
