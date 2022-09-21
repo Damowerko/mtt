@@ -23,7 +23,7 @@ def find_peaks(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
 
     # assuming number of peaks is approximately the sum of all pixels
-    n_components = int(np.round(img.sum()))
+    n_components = int(np.round(image.sum()))
 
     # set negative pixels to zero
     image = np.maximum(image, 0)
@@ -63,7 +63,7 @@ def fit_gmm(samples: np.ndarray, n_components: int):
     return means, covariances
 
 
-if __name__ == "__main__":
+def main():
     n = rng.poisson(10)
     width = 1000
     img_size = 256
@@ -109,3 +109,7 @@ if __name__ == "__main__":
     ax[2].set_title("GMM")
 
     plt.savefig("figures/peaks.png")
+
+
+if __name__ == "__main__":
+    main()
