@@ -1,6 +1,7 @@
 import argparse
 from ast import arg
 import os
+from typing import Callable, Union
 
 import pytorch_lightning as pl
 from mtt.data import OnlineDataset
@@ -21,8 +22,7 @@ def get_model_cls(model_type) -> EncoderDecoder:
     assert issubclass(models[model_type], EncoderDecoder)
     return models[model_type]
 
-
-def train(params: argparse.Namespace):
+def get_dataset(params: argparse.Namespace) -> OnlineDataset:
     init_simulator = lambda: Simulator(
         width=1000,
         n_targets=10,
@@ -37,27 +37,14 @@ def train(params: argparse.Namespace):
         noise_bearing=0.2,
         dt=0.1,
     )
-    dataset = OnlineDataset(
+    return OnlineDataset(
         length=params.input_length,
-        init_simulator=init_simulator,
+        init_simulator=init_simulator\,
         sigma_position=0.01,
         **vars(params),
     )
-    train_loader = DataLoader(
-        dataset,
-        batch_size=params.batch_size,
-        num_workers=params.batch_size,
-        pin_memory=True,
-        collate_fn=dataset.collate_fn,
-    )
-    val_loader = DataLoader(
-        dataset,
-        batch_size=1,
-        pin_memory=True,
-        collate_fn=dataset.collate_fn,
-    )
-    model = Conv2dCoder(**vars(params))
 
+def get_trainer(params: argparse.Namespace) -> pl.Trainer:
     logger = (
         TensorBoardLogger(save_dir="./", name="tensorboard", version="")
         if params.log
@@ -78,8 +65,7 @@ def train(params: argparse.Namespace):
             patience=params.patience,
         ),
     ]
-
-    trainer = pl.Trainer(
+    return pl.Trainer(
         logger=logger,
         callbacks=callbacks,
         precision=32,
@@ -89,11 +75,41 @@ def train(params: argparse.Namespace):
         check_val_every_n_epoch=5,
     )
 
-    # check if checkpoint exists
+def get_checkpoint_path() -> Union[str, None]:
     ckpt_path = "./checkpoints/last.ckpt"
-    ckpt_path = ckpt_path if os.path.exists(ckpt_path) else None
+    return ckpt_path if os.path.exists(ckpt_path) else None
 
-    trainer.fit(model, train_loader, val_loader, ckpt_path=ckpt_path)
+def train(params: argparse.Namespace):
+    dataset = get_dataset(params)
+    train_loader = DataLoader(
+        dataset,
+        batch_size=params.batch_size,
+        num_workers=params.batch_size,
+        pin_memory=True,
+        collate_fn=dataset.collate_fn,
+    )
+    val_loader = DataLoader(
+        dataset,
+        batch_size=1,
+        pin_memory=True,
+        collate_fn=dataset.collate_fn,
+    )
+    trainer = get_trainer(params)
+    model = Conv2dCoder(**vars(params))
+    trainer.fit(model, train_loader, val_loader, ckpt_path=get_checkpoint_path())
+    trainer.test(model, val_loader, ckpt_path=get_checkpoint_path())
+
+def test(params: argparse.Namespace):
+    dataset = get_dataset(params)
+    test_loader = DataLoader(
+        dataset,
+        batch_size=1,
+        pin_memory=True,
+        collate_fn=dataset.collate_fn,
+    )
+    trainer = get_trainer(params)
+    model = Conv2dCoder(**vars(params))
+    trainer.test(model, test_loader, ckpt_path=get_checkpoint_path())
 
 
 if __name__ == "__main__":
@@ -105,7 +121,7 @@ if __name__ == "__main__":
     # data arguments
     group = parser.add_argument_group("Data")
     group.add_argument("--batch_size", type=int, default=16)
-    group.add_argument("--n_steps", type=int, default=100)
+    group.add_argument("--n_steps", type=int, default=1000)
 
     # model arguments
     group = parser.add_argument_group("Model")
