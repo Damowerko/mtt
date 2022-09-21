@@ -55,7 +55,7 @@ def get_trainer(params: argparse.Namespace) -> pl.Trainer:
         ModelCheckpoint(
             monitor="train/loss",
             dirpath="./checkpoints",
-            filename="epoch={epoch}-loss={train/loss:0.4f}",
+            filename="best",
             auto_insert_metric_name=False,
             mode="min",
             save_last=True,
@@ -82,7 +82,7 @@ def get_trainer(params: argparse.Namespace) -> pl.Trainer:
 
 
 def get_checkpoint_path() -> Union[str, None]:
-    ckpt_path = "./checkpoints/last.ckpt"
+    ckpt_path = "./checkpoints/best.ckpt"
     return ckpt_path if os.path.exists(ckpt_path) else None
 
 
@@ -124,6 +124,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # program arguments
+    parser.add_argument("operation", choices=["train", "test"])
     parser.add_argument("--no_log", action="store_true")
 
     # data arguments
@@ -142,4 +143,9 @@ if __name__ == "__main__":
     group.add_argument("--patience", type=int, default=4)
 
     params = parser.parse_args()
-    train(params)
+    if params.operation == "train":
+        train(params)
+    elif params.operation == "test":
+        test(params)
+    else:
+        raise ValueError(f"Unknown operation: {params.operation}")

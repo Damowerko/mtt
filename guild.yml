@@ -1,9 +1,24 @@
 - operations:
     train:
-      main: scripts/train
+      main: scripts/main train
       output-scalars: off
       flags-dest: args
       flags-import: all
+      sourcecode:
+        select:
+          - "*.py"
+          - include:
+              dir: scripts
+          - include:
+              dir: src
+    test:
+      main: scripts/main test
+      output-scalars: off
+      flags-dest: args
+      flags-import: all
+      requires:
+        - operation: train
+          select: '.+\.ckpt'
       sourcecode:
         select:
           - "*.py"
