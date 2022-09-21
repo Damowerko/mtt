@@ -110,7 +110,8 @@ class EncoderDecoder(pl.LightningModule):
             ax[i, 2].imshow(output.cpu().numpy())  # type: ignore
         plt.setp(ax, xticks=[], yticks=[])
         plt.subplots_adjust(wspace=0, hspace=0)
-        self.logger.experiment.add_figure("images", fig, self.current_epoch)  # type: ignore
+        if self.logger:
+            self.logger.experiment.add_figure("images", fig, self.current_epoch)  # type: ignore
 
     def ospa(self, batch):
         input_img, target_img, info = batch
