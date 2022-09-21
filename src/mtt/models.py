@@ -80,7 +80,7 @@ class EncoderDecoder(pl.LightningModule):
         else:
             raise ValueError(f"Unknown loss {self.loss_fn}")
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, *_):
         input_img, target_img, *_ = batch
         output_img = self(input_img)
         assert output_img.shape == target_img.shape
@@ -88,7 +88,7 @@ class EncoderDecoder(pl.LightningModule):
         self.log("train/loss", loss)
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, *_):
         input_img, target_img, *_ = batch
         output_img = self(input_img)
         assert output_img.shape == target_img.shape
@@ -97,24 +97,32 @@ class EncoderDecoder(pl.LightningModule):
         self.log("val/ospa", self.ospa(batch), prog_bar=True)
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
-    # def validation_epoch_end(self, outputs):
-    #     n_rows = min(1, len(outputs))
-    #     idx = rng.choice(len(outputs), size=n_rows, replace=False)
-    #     fig, ax = plt.subplots(
-    #         n_rows, 3, figsize=(9, 3 * n_rows), sharex=True, sharey=True, squeeze=False
-    #     )
-    #     for i, j in enumerate(idx):
-    #         input, target, output = outputs[j]
-    #         assert isinstance(input, torch.Tensor)
-    #         assert isinstance(target, torch.Tensor)
-    #         assert isinstance(output, torch.Tensor)
-    #         ax[i, 0].imshow(input.cpu().numpy())  # type: ignore
-    #         ax[i, 1].imshow(target.cpu().numpy())  # type: ignore
-    #         ax[i, 2].imshow(output.cpu().numpy())  # type: ignore
-    #     plt.setp(ax, xticks=[], yticks=[])
-    #     plt.subplots_adjust(wspace=0, hspace=0)
-    #     if self.logger:
-    #         self.logger.experiment.add_figure("images", fig, self.current_epoch)  # type: ignore
+    def test_step(self, batch, *_):
+        input_img, target_img, *_ = batch
+        output_img = self(input_img)
+        assert output_img.shape == target_img.shape
+        self.log("test/loss", self.loss(output_img, target_img))
+        self.log("test/ospa", self.ospa(batch), prog_bar=True)
+        return input_img[0, -1], target_img[0, -1], output_img[0, -1]
+
+    def test_epoch_end(self, outputs):
+        n_rows = min(5, len(outputs))
+        idx = rng.choice(len(outputs), size=n_rows, replace=False)
+        fig, ax = plt.subplots(
+            n_rows, 3, figsize=(9, 3 * n_rows), sharex=True, sharey=True, squeeze=False
+        )
+        for i, j in enumerate(idx):
+            input, target, output = outputs[j]
+            assert isinstance(input, torch.Tensor)
+            assert isinstance(target, torch.Tensor)
+            assert isinstance(output, torch.Tensor)
+            ax[i, 0].imshow(input.cpu().numpy())  # type: ignore
+            ax[i, 1].imshow(target.cpu().numpy())  # type: ignore
+            ax[i, 2].imshow(output.cpu().numpy())  # type: ignore
+        plt.setp(ax, xticks=[], yticks=[])
+        plt.subplots_adjust(wspace=0, hspace=0)
+        if self.logger:
+            self.logger.experiment.add_figure("images", fig, self.current_epoch)  # type: ignore
 
     def ospa(self, batch):
         input_img, target_img, info = batch
@@ -127,13 +135,6 @@ class EncoderDecoder(pl.LightningModule):
             Y = info[i][-1]["target_positions"]
             ospa_value += ospa(X, Y, self.ospa_cutoff, p=2)
         return ospa_value / output_img.shape[0]
-
-    def test_step(self, batch, *args):
-        input_imgs, target_imgs, infos = batch
-        output_img = self(input_imgs)
-        assert output_img.shape == target_imgs.shape
-        self.log("test/loss", self.loss(output_img, target_imgs))
-        self.log("test/ospa", self.ospa(batch), prog_bar=True)
 
     def configure_optimizers(self):
         # pick optimizer
