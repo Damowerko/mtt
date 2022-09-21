@@ -1,13 +1,12 @@
 import argparse
-from ast import arg
 import os
-from typing import Callable, Union
+from typing import Union
 
 import pytorch_lightning as pl
 from mtt.data import OnlineDataset
 from mtt.models import Conv2dCoder, Conv3dCoder, EncoderDecoder
 from mtt.simulator import Simulator
-from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
