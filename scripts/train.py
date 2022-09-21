@@ -61,12 +61,15 @@ def get_trainer(params: argparse.Namespace) -> pl.Trainer:
             mode="min",
             save_last=True,
             save_top_k=1,
-        ),
+        )
+        if params.log
+        else None,
         EarlyStopping(
             monitor="train/loss",
             patience=params.patience,
         ),
     ]
+    callbacks = [c for c in callbacks if c is not None]
     return pl.Trainer(
         logger=logger,
         callbacks=callbacks,
