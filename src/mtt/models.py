@@ -40,7 +40,10 @@ class EncoderDecoder(pl.LightningModule):
         for name, types, default in args:
             if types[0] not in (int, float, str, bool):
                 continue
-            group.add_argument(f"--{name}", type=types[0], default=default)
+            if types[0] == bool:
+                group.add_argument(f"--{name}", type=types[0], action="store_true")
+            else:
+                group.add_argument(f"--{name}", type=types[0], default=default)
         return group
 
     def __init__(
