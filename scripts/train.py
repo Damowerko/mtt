@@ -22,6 +22,7 @@ def get_model_cls(model_type) -> EncoderDecoder:
     assert issubclass(models[model_type], EncoderDecoder)
     return models[model_type]
 
+
 def get_dataset(params: argparse.Namespace) -> OnlineDataset:
     init_simulator = lambda: Simulator(
         width=1000,
@@ -39,10 +40,11 @@ def get_dataset(params: argparse.Namespace) -> OnlineDataset:
     )
     return OnlineDataset(
         length=params.input_length,
-        init_simulator=init_simulator\,
+        init_simulator=init_simulator,
         sigma_position=0.01,
         **vars(params),
     )
+
 
 def get_trainer(params: argparse.Namespace) -> pl.Trainer:
     logger = (
@@ -75,9 +77,11 @@ def get_trainer(params: argparse.Namespace) -> pl.Trainer:
         check_val_every_n_epoch=5,
     )
 
+
 def get_checkpoint_path() -> Union[str, None]:
     ckpt_path = "./checkpoints/last.ckpt"
     return ckpt_path if os.path.exists(ckpt_path) else None
+
 
 def train(params: argparse.Namespace):
     dataset = get_dataset(params)
@@ -98,6 +102,7 @@ def train(params: argparse.Namespace):
     model = Conv2dCoder(**vars(params))
     trainer.fit(model, train_loader, val_loader, ckpt_path=get_checkpoint_path())
     trainer.test(model, val_loader, ckpt_path=get_checkpoint_path())
+
 
 def test(params: argparse.Namespace):
     dataset = get_dataset(params)
