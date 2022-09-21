@@ -133,18 +133,22 @@ class EncoderDecoder(pl.LightningModule):
         self.log("test/ospa", self.ospa(batch), prog_bar=True)
 
     def configure_optimizers(self):
+        # pick optimizer
         if self.optimizer == "adamw":
-            return torch.optim.AdamW(
+            optimizer = torch.optim.AdamW(
                 self.parameters(),
                 lr=self.lr,
                 weight_decay=self.weight_decay,
             )
         elif self.optimizer == "sgd":
-            return torch.optim.SGD(
+            optimizer = torch.optim.SGD(
                 self.parameters(),
                 lr=self.lr,
                 weight_decay=self.weight_decay,
             )
+        else:
+            raise ValueError(f"Unknown optimizer {self.optimizer}")
+        return optimizer
 
 
 class Conv2dCoder(EncoderDecoder):
@@ -156,6 +160,7 @@ class Conv2dCoder(EncoderDecoder):
         n_channels_hidden: int = 128,
         kernel_size: int = 9,
         dilation: int = 1,
+        batch_norm: bool = True,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -186,6 +191,11 @@ class Conv2dCoder(EncoderDecoder):
                     padding,
                     _dilation,
                 ),
+                (
+                    nn.BatchNorm2d(encoder_channels[i + 1])
+                    if batch_norm
+                    else nn.Identity()
+                ),
                 nn.ReLU(True),
             ]
         self.encoder = nn.Sequential(*encoder_layers)
@@ -213,7 +223,12 @@ class Conv2dCoder(EncoderDecoder):
                     tuple(output_padding),
                     dilation=dilation,
                 ),
-                nn.ReLU(True) if i < len(decoder_channels) - 2 else nn.Identity(),
+                (
+                    nn.BatchNorm2d(encoder_channels[i + 1])
+                    if batch_norm
+                    else nn.Identity()
+                ),
+                nn.ReLU(True),
             ]
         self.decoder = nn.Sequential(*decoder_layers)
 
@@ -223,6 +238,11 @@ class Conv2dCoder(EncoderDecoder):
         for i in range(n_hidden + 1):
             hidden_layers += [
                 nn.Conv2d(hidden_channels[i], hidden_channels[i + 1], 1),
+                (
+                    nn.BatchNorm2d(encoder_channels[i + 1])
+                    if batch_norm
+                    else nn.Identity()
+                ),
                 nn.ReLU(True),
             ]
         self.hidden = nn.Sequential(*hidden_layers)
