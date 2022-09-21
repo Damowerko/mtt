@@ -11,9 +11,9 @@ from mtt.simulator import Simulator
 class OnlineDataset(IterableDataset):
     def __init__(
         self,
-        n_steps: int = 10000,
+        n_steps: int = 1000,
         length: int = 20,
-        img_size: int = 256,
+        img_size: int = 128,
         sigma_position: float = 10.0,
         init_simulator: Callable[..., Simulator] = Simulator,
         **kwargs,
