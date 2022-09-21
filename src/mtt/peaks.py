@@ -22,11 +22,11 @@ def find_peaks(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         covariances: (n_peaks, 2, 2) the covariance of each peak.
     """
 
-    # assuming number of peaks is approximately the sum of all pixels
-    n_components = int(np.round(image.sum()))
-
     # set negative pixels to zero
     image = np.maximum(image, 0)
+
+    # assuming number of peaks is approximately the sum of all pixels
+    n_components = int(np.round(image.sum()))
 
     # Sample image based on pixel values.
     samples = sample_image(image)
@@ -44,6 +44,8 @@ def sample_image(img: np.ndarray) -> np.ndarray:
     X, Y = np.meshgrid(np.arange(img.shape[1]), np.arange(img.shape[0]))
     XY = np.stack([X, Y], axis=-1)
 
+    # add epsilon to avoid division by zero
+    img = img + 1e-8
     idx = rng.choice(
         img.size, size=img.size, p=img.reshape(-1) / img.sum(), shuffle=False
     )
@@ -55,6 +57,12 @@ def fit_gmm(samples: np.ndarray, n_components: int):
     1. Sample `img` based on pixel values.
     2. Fit gaussian mixture model to find peaks.
     """
+    # if n_components is zero, return empty arrays
+    if n_components == 0:
+        return np.empty((0, 2)), np.empty((0, 2, 2))
+    if n_components < 0:
+        raise ValueError(f"n_components must be non-negative, got {n_components}.")
+
     # Fit gaussian mixture model to find peaks.
     gmm = GaussianMixture(n_components=n_components, covariance_type="full")
     gmm.fit(samples)
