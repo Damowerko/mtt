@@ -6,6 +6,9 @@ import torch.nn.functional as F
 import numpy as np
 import matplotlib.pyplot as plt
 
+from mtt.utils import ospa
+from mtt.peaks import find_peaks
+
 rng = np.random.default_rng()
 
 
@@ -49,6 +52,7 @@ class EncoderDecoder(pl.LightningModule):
         optimizer: str = "adamw",
         lr: float = 1e-3,
         weight_decay: float = 0,
+        ospa_cutoff: float = 100,
         **kwargs,
     ):
         super().__init__()
@@ -59,6 +63,7 @@ class EncoderDecoder(pl.LightningModule):
         self.optimizer = optimizer
         self.lr = lr
         self.weight_decay = weight_decay
+        self.ospa_cutoff = ospa_cutoff
 
     def forward(self, x):
         raise NotImplementedError
@@ -86,6 +91,7 @@ class EncoderDecoder(pl.LightningModule):
         assert output_img.shape == target_img.shape
         loss = self.loss(output_img, target_img)
         self.log("val/loss", loss, prog_bar=True)
+        self.log("val/ospa", self.ospa(batch))
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
     def validation_epoch_end(self, outputs):
@@ -105,6 +111,25 @@ class EncoderDecoder(pl.LightningModule):
         plt.setp(ax, xticks=[], yticks=[])
         plt.subplots_adjust(wspace=0, hspace=0)
         self.logger.experiment.add_figure("images", fig, self.current_epoch)  # type: ignore
+
+    def ospa(self, batch):
+        input_img, target_img, info = batch
+        output_img = self(input_img)
+        assert output_img.shape == target_img.shape
+        ospa_value = 0
+        for i in range(output_img.shape[0]):
+            img = output_img[i, -1].cpu().numpy()
+            X, _ = find_peaks(img)
+            Y = info[i][-1]["target_positions"]
+            ospa_value += ospa(X, Y, self.ospa_cutoff, p=2)
+        return ospa_value / output_img.shape[0]
+
+    def test_step(self, batch, *args):
+        input_imgs, target_imgs, infos = batch
+        output_img = self(input_imgs)
+        assert output_img.shape == target_imgs.shape
+        self.log("test/loss", self.loss(output_img, target_imgs))
+        self.log("test/ospa", self.ospa(batch), prog_bar=True)
 
     def configure_optimizers(self):
         if self.optimizer == "adamw":
