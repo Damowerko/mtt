@@ -94,7 +94,7 @@ class EncoderDecoder(pl.LightningModule):
         assert output_img.shape == target_img.shape
         loss = self.loss(output_img, target_img)
         self.log("val/loss", loss, prog_bar=True)
-        self.log("val/ospa", self.ospa(batch))
+        self.log("val/ospa", self.ospa(batch), prog_bar=True)
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
     # def validation_epoch_end(self, outputs):
