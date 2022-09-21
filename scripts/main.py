@@ -78,7 +78,7 @@ def get_trainer(params: argparse.Namespace) -> pl.Trainer:
         gpus=params.gpus,
         max_epochs=params.max_epochs,
         default_root_dir=".",
-        check_val_every_n_epoch=5,
+        check_val_every_n_epoch=1,
     )
 
 
@@ -141,7 +141,7 @@ if __name__ == "__main__":
     group = parser.add_argument_group("Trainer")
     group.add_argument("--max_epochs", type=int, default=1000)
     group.add_argument("--gpus", type=int, default=1)
-    group.add_argument("--patience", type=int, default=4)
+    group.add_argument("--patience", type=int, default=10)
 
     params = parser.parse_args()
     if params.operation == "train":
