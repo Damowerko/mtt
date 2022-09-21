@@ -22,7 +22,7 @@ def get_model_cls(model_type) -> EncoderDecoder:
     return models[model_type]
 
 
-def get_dataset(params: argparse.Namespace) -> OnlineDataset:
+def get_dataset(params: argparse.Namespace, n_steps=1000) -> OnlineDataset:
     init_simulator = lambda: Simulator(
         width=1000,
         n_targets=10,
@@ -40,6 +40,7 @@ def get_dataset(params: argparse.Namespace) -> OnlineDataset:
     return OnlineDataset(
         length=params.input_length,
         init_simulator=init_simulator,
+        n_steps=n_steps,
         sigma_position=10,
         **vars(params),
     )
@@ -87,24 +88,25 @@ def get_checkpoint_path() -> Union[str, None]:
 
 
 def train(params: argparse.Namespace):
-    dataset = get_dataset(params)
+    train_dataset = get_dataset(params, n_steps=1000)
+    test_dataset = get_dataset(params, n_steps=100)
     train_loader = DataLoader(
-        dataset,
+        train_dataset,
         batch_size=params.batch_size,
         num_workers=params.batch_size,
         pin_memory=True,
-        collate_fn=dataset.collate_fn,
+        collate_fn=train_dataset.collate_fn,
     )
-    val_loader = DataLoader(
-        dataset,
-        batch_size=1,
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=params.batch_size,
         pin_memory=True,
-        collate_fn=dataset.collate_fn,
+        collate_fn=train_dataset.collate_fn,
     )
     trainer = get_trainer(params)
     model = Conv2dCoder(**vars(params))
-    trainer.fit(model, train_loader, val_loader, ckpt_path=get_checkpoint_path())
-    trainer.test(model, val_loader, ckpt_path=get_checkpoint_path())
+    trainer.fit(model, train_loader, test_loader, ckpt_path=get_checkpoint_path())
+    trainer.test(model, test_loader, ckpt_path=get_checkpoint_path())
 
 
 def test(params: argparse.Namespace):
@@ -130,7 +132,6 @@ if __name__ == "__main__":
     # data arguments
     group = parser.add_argument_group("Data")
     group.add_argument("--batch_size", type=int, default=16)
-    group.add_argument("--n_steps", type=int, default=1000)
 
     # model arguments
     group = parser.add_argument_group("Model")
