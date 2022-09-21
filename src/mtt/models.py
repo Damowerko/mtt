@@ -41,7 +41,7 @@ class EncoderDecoder(pl.LightningModule):
             if types[0] not in (int, float, str, bool):
                 continue
             if types[0] == bool:
-                group.add_argument(f"--{name}", type=types[0], action="store_true")
+                group.add_argument(f"--{name}", dest=name, action="store_true")
             else:
                 group.add_argument(f"--{name}", type=types[0], default=default)
         return group
@@ -97,24 +97,24 @@ class EncoderDecoder(pl.LightningModule):
         self.log("val/ospa", self.ospa(batch))
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
-    def validation_epoch_end(self, outputs):
-        n_rows = min(1, len(outputs))
-        idx = rng.choice(len(outputs), size=n_rows, replace=False)
-        fig, ax = plt.subplots(
-            n_rows, 3, figsize=(9, 3 * n_rows), sharex=True, sharey=True, squeeze=False
-        )
-        for i, j in enumerate(idx):
-            input, target, output = outputs[j]
-            assert isinstance(input, torch.Tensor)
-            assert isinstance(target, torch.Tensor)
-            assert isinstance(output, torch.Tensor)
-            ax[i, 0].imshow(input.cpu().numpy())  # type: ignore
-            ax[i, 1].imshow(target.cpu().numpy())  # type: ignore
-            ax[i, 2].imshow(output.cpu().numpy())  # type: ignore
-        plt.setp(ax, xticks=[], yticks=[])
-        plt.subplots_adjust(wspace=0, hspace=0)
-        if self.logger:
-            self.logger.experiment.add_figure("images", fig, self.current_epoch)  # type: ignore
+    # def validation_epoch_end(self, outputs):
+    #     n_rows = min(1, len(outputs))
+    #     idx = rng.choice(len(outputs), size=n_rows, replace=False)
+    #     fig, ax = plt.subplots(
+    #         n_rows, 3, figsize=(9, 3 * n_rows), sharex=True, sharey=True, squeeze=False
+    #     )
+    #     for i, j in enumerate(idx):
+    #         input, target, output = outputs[j]
+    #         assert isinstance(input, torch.Tensor)
+    #         assert isinstance(target, torch.Tensor)
+    #         assert isinstance(output, torch.Tensor)
+    #         ax[i, 0].imshow(input.cpu().numpy())  # type: ignore
+    #         ax[i, 1].imshow(target.cpu().numpy())  # type: ignore
+    #         ax[i, 2].imshow(output.cpu().numpy())  # type: ignore
+    #     plt.setp(ax, xticks=[], yticks=[])
+    #     plt.subplots_adjust(wspace=0, hspace=0)
+    #     if self.logger:
+    #         self.logger.experiment.add_figure("images", fig, self.current_epoch)  # type: ignore
 
     def ospa(self, batch):
         input_img, target_img, info = batch
