@@ -72,7 +72,7 @@ def ospa(X: np.ndarray, Y: np.ndarray, cutoff: float, p: int = 2) -> float:
     n = Y.shape[0]
 
     # ospa is symmetric, so we assume m <= n.
-    if n > m:
+    if m > n:
         return ospa(Y, X, cutoff)
     if n == 0:
         return 0
