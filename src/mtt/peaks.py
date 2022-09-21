@@ -21,6 +21,9 @@ def find_peaks(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         means: (n_peaks, 2) the mean of each peak.
         covariances: (n_peaks, 2, 2) the covariance of each peak.
     """
+    # set negative pixels to zero
+    image = np.maximum(image, 0)
+
     # Sample image based on pixel values.
     samples = sample_image(image)
 
