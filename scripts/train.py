@@ -49,7 +49,7 @@ def get_dataset(params: argparse.Namespace) -> OnlineDataset:
 def get_trainer(params: argparse.Namespace) -> pl.Trainer:
     logger = (
         TensorBoardLogger(save_dir="./", name="tensorboard", version="")
-        if params.log
+        if not params.no_log
         else None
     )
     callbacks = [
@@ -62,7 +62,7 @@ def get_trainer(params: argparse.Namespace) -> pl.Trainer:
             save_last=True,
             save_top_k=1,
         )
-        if params.log
+        if not params.no_log
         else None,
         EarlyStopping(
             monitor="train/loss",
@@ -73,7 +73,7 @@ def get_trainer(params: argparse.Namespace) -> pl.Trainer:
     return pl.Trainer(
         logger=logger,
         callbacks=callbacks,
-        enable_checkpointing=params.log,
+        enable_checkpointing=not params.no_log,
         precision=32,
         gpus=params.gpus,
         max_epochs=params.max_epochs,
@@ -125,9 +125,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # program arguments
-    parser.add_argument(
-        "--no-log", dest="log", action="store_false", help="Disable logging"
-    )
+    parser.add_argument("--no_log", action="store_true")
 
     # data arguments
     group = parser.add_argument_group("Data")
