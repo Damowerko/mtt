@@ -51,10 +51,10 @@ def gaussian(XY, mu, cov):
 
 def ospa(X: np.ndarray, Y: np.ndarray, cutoff: float, p: int = 2) -> float:
     """
-    Compute the OSPA metric with cutoff `cutoff`.
+    Compute the OSPA metric.
     Args:
-        estimates: (m, 2) the estimated positions.
-        targets: (n, 2) the target positions.
+        X: (m, 2) set of positions.
+        Y: (n, 2) set of positions.
         cutoff: the cutoff for the OSPA metric.
         p: the p-norm to use.
     Returns:
