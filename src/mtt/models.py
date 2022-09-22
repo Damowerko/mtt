@@ -1,3 +1,4 @@
+from typing import Callable
 import pytorch_lightning as pl
 from pytorch_lightning.utilities.argparse import get_init_arguments_and_types
 import torch
@@ -166,6 +167,7 @@ class Conv2dCoder(EncoderDecoder):
         kernel_size: int = 9,
         dilation: int = 1,
         batch_norm: bool = True,
+        activation: str = "relu",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -175,6 +177,10 @@ class Conv2dCoder(EncoderDecoder):
         _kernel_size = (kernel_size, kernel_size)
         stride = (2, 2)
         _dilation = (dilation, dilation)
+        _activation: Callable[..., nn.Module] = {
+            "relu": lambda: nn.ReLU(inplace=True),
+            "leaky_relu": lambda: nn.LeakyReLU(inplace=True),
+        }[activation]
 
         # initialize the encoder and decoder layers
         # the input layer has one channel
@@ -201,7 +207,7 @@ class Conv2dCoder(EncoderDecoder):
                     if batch_norm
                     else nn.Identity()
                 ),
-                nn.ReLU(True),
+                _activation(),
             ]
         self.encoder = nn.Sequential(*encoder_layers)
 
@@ -229,11 +235,11 @@ class Conv2dCoder(EncoderDecoder):
                     dilation=dilation,
                 ),
                 (
-                    nn.BatchNorm2d(encoder_channels[i + 1])
+                    nn.BatchNorm2d(decoder_channels[i + 1])
                     if batch_norm
                     else nn.Identity()
                 ),
-                nn.ReLU(True),
+                _activation(),
             ]
         self.decoder = nn.Sequential(*decoder_layers)
 
@@ -244,11 +250,11 @@ class Conv2dCoder(EncoderDecoder):
             hidden_layers += [
                 nn.Conv2d(hidden_channels[i], hidden_channels[i + 1], 1),
                 (
-                    nn.BatchNorm2d(encoder_channels[i + 1])
+                    nn.BatchNorm2d(hidden_channels[i + 1])
                     if batch_norm
                     else nn.Identity()
                 ),
-                nn.ReLU(True),
+                _activation(),
             ]
         self.hidden = nn.Sequential(*hidden_layers)
 
