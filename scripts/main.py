@@ -23,25 +23,11 @@ def get_model_cls(model_type) -> EncoderDecoder:
 
 
 def get_dataset(params: argparse.Namespace, n_steps=1000) -> OnlineDataset:
-    init_simulator = lambda: Simulator(
-        width=1000,
-        n_targets=10,
-        target_lifetime=5,
-        clutter_rate=10,
-        p_detection=0.95,
-        sigma_motion=0.5,
-        sigma_initial_state=(10.0, 10.0),
-        n_sensors=3,
-        sensor_range=500,
-        noise_range=20.0,
-        noise_bearing=0.2,
-        dt=0.1,
-    )
+    init_simulator = lambda: Simulator()
     return OnlineDataset(
         length=params.input_length,
         init_simulator=init_simulator,
         n_steps=n_steps,
-        sigma_position=10,
         **vars(params),
     )
 

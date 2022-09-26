@@ -133,7 +133,7 @@ class EncoderDecoder(pl.LightningModule):
         ospa_value = 0
         for i in range(output_img.shape[0]):
             img = output_img[i, -1].cpu().numpy()
-            X, _ = find_peaks(img)
+            X, _ = find_peaks(img, info[i][-1]["window"])
             Y = info[i][-1]["target_positions"]
             ospa_value += ospa(X, Y, self.ospa_cutoff, p=2)
         return ospa_value / output_img.shape[0]

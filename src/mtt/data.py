@@ -1,5 +1,6 @@
 from collections import deque
-from typing import Callable
+from typing import Callable, Optional
+from concurrent.futures import ProcessPoolExecutor
 
 import numpy as np
 import torch
@@ -33,19 +34,27 @@ class OnlineDataset(IterableDataset):
         self.sigma_position = sigma_position
         self.init_simulator = init_simulator
 
-    def __iter__(self):
-        simulator = self.init_simulator()
-
-        sensor_imgs = deque(maxlen=self.length)
-        position_imgs = deque(maxlen=self.length)
-        infos = deque(maxlen=self.length)
-        for _ in range(self.n_steps + self.length):
+    def iter_simulation(self, simulator: Optional[Simulator] = None):
+        simulator = self.init_simulator() if simulator is None else simulator
+        for _ in range(self.n_steps):
             simulator.update()
             target_positions = simulator.positions
             sensor_positions = np.stack([s.position for s in simulator.sensors], axis=0)
             measurements = simulator.measurements()
             clutter = simulator.clutter()
+            yield target_positions, sensor_positions, measurements, clutter
 
+    def __iter__(self):
+        simulator = self.init_simulator()
+        sensor_imgs = deque(maxlen=self.length)
+        position_imgs = deque(maxlen=self.length)
+        infos = deque(maxlen=self.length)
+        for (
+            target_positions,
+            sensor_positions,
+            measurements,
+            clutter,
+        ) in self.iter_simulation(simulator):
             sensor_imgs.append(
                 torch.Tensor(
                     simulator.measurement_image(self.img_size, measurements, clutter)
@@ -66,9 +75,9 @@ class OnlineDataset(IterableDataset):
                     sensor_positions=sensor_positions,
                     measurements=measurements,
                     clutter=clutter,
+                    window=simulator.window,
                 )
             )
-
             if len(sensor_imgs) == self.length:
                 yield (
                     torch.stack(tuple(sensor_imgs)),
@@ -83,3 +92,13 @@ class OnlineDataset(IterableDataset):
             torch.stack(tuple(positions_imgs for _, positions_imgs, _ in batch)),
             list(infos for _, _, infos in batch),
         )
+
+
+def generate_data(online_dataset: OnlineDataset, n_simulations=10):
+    with ProcessPoolExecutor() as executor:
+        futures = [
+            executor.submit(lambda: list(online_dataset.iter_simulation()))
+            for _ in range(n_simulations)
+        ]
+        for future in futures:
+            yield from future.result()

@@ -1,7 +1,8 @@
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Sequence, Tuple, Union
 import numpy as np
 from mtt.target import Target
 from mtt.sensor import Sensor
+from mtt.utils import to_cartesian
 
 rng = np.random.default_rng()
 
@@ -13,14 +14,15 @@ class Simulator:
         width: Union[float, None] = None,
         n_targets: float = 10,
         target_lifetime: float = 10,
-        clutter_rate: float = 10,
+        n_clutter: float = 40,
         p_detection: float = 0.95,
-        sigma_motion: float = 0.5,
-        sigma_initial_state: Tuple[float, float] = (1.0, 1.0),
-        n_sensors: float = 5,
-        sensor_range: float = 500,
+        model="CV",
+        sigma_motion: float = 1.0,
+        sigma_initial_state: Sequence[float] = (50.0,),
+        n_sensors: float = 1.0,
+        sensor_range: float = 2000,
         noise_range: float = 10.0,
-        noise_bearing: float = 0.1,
+        noise_bearing: float = 0.035,
         dt: float = 0.1,
     ):
         """
@@ -30,7 +32,7 @@ class Simulator:
             n_targets: The average number of targets per km^2.
             n_sensors: The average number of sensors per km^22.
             target_lifetime: The average lifetime of a target in seconds.
-            p_clutter: The clutter probability (poisson).
+            clutter_rate: The clutter probability (poisson).
             p_detection: The detection probability.
             sigma_motion: The standard deviation of the target motion.
             sigma_initial_state: The standard deviation of the initial target state.
@@ -45,12 +47,13 @@ class Simulator:
 
         self.survival_rate = 1 - 1 / target_lifetime
         self.birth_rate = n_targets / target_lifetime
-        self.clutter_rate = clutter_rate
+        self.n_clutter = n_clutter
         self.p_detection = p_detection
 
         self.sigma_motion = sigma_motion
         self.sigma_initial_state = sigma_initial_state
         self.dt = dt
+        self.model = model
 
         self.targets = [
             self.init_target()
@@ -69,11 +72,14 @@ class Simulator:
                     high=self.width / 2,
                     size=(2, 1),
                 ),
-                rng.normal(scale=self.sigma_initial_state, size=(2, 2)),
+                rng.normal(
+                    scale=self.sigma_initial_state,
+                    size=(2, len(self.sigma_initial_state)),
+                ),
             ),
             axis=1,
         )
-        return Target(initial_state, sigma=self.sigma_motion)
+        return Target(initial_state, sigma=self.sigma_motion, model=self.model)
 
     def init_sensor(
         self, range_max: float, noise_range: float, noise_bearing: float
@@ -131,27 +137,36 @@ class Simulator:
 
     def clutter(self):
         clutter = []
-        for _ in self.sensors:
-            # p_clutter is the total clutter probability across all sensors
-            n_clutter = rng.poisson(self.clutter_rate * self.area / len(self.sensors))
-            clutter.append(
-                rng.uniform(
-                    low=-self.width / 2,
-                    high=self.width / 2,
-                    size=(n_clutter, 2),
-                )
+        for sensor in self.sensors:
+            # clutter rate is per one sensor
+            n_clutter = rng.poisson(self.n_clutter)
+
+            # measurements in polar coordinates
+            rtheta = np.stack(
+                (
+                    rng.uniform(low=0, high=sensor.range_max, size=n_clutter),
+                    rng.uniform(low=0, high=2 * np.pi, size=n_clutter),
+                ),
+                axis=1,
             )
+            XY = to_cartesian(rtheta) - sensor.position
+            clutter.append(XY)
         return clutter
 
-    def position_image(self, size, sigma, target_positions) -> np.ndarray:
+    def position_image(
+        self, size: int, sigma: float, target_positions: np.ndarray
+    ) -> np.ndarray:
         """
         Create an image of the targets at the given positions.
 
         Args:
             size: The withd and height of the image.
-            x: (N,2) The positions of the targets.
+            sigma: The size of the position blob.
+            target_positions: (N,2) The positions of the targets.
         """
         x = target_positions
+        # only consider measurements in windows
+        x = x[(np.abs(x) < self.window / 2).all(axis=1)]
         X, Y = np.meshgrid(
             np.linspace(-self.window / 2, self.window / 2, size),
             np.linspace(-self.window / 2, self.window / 2, size),
@@ -179,11 +194,13 @@ class Simulator:
             target_measurements = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
         if clutter is None:
             clutter = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
-
         x = np.linspace(-self.window / 2, self.window / 2, size)
         y = np.linspace(-self.window / 2, self.window / 2, size)
         XY = np.stack(np.meshgrid(x, y), axis=2)
         Z = np.zeros((size, size))
         for s, m, c in zip(self.sensors, target_measurements, clutter):
+            m = m[(np.abs(m) < self.window / 2).all(axis=1)]
+            c = c[(np.abs(c) < self.window / 2).all(axis=1)]
+
             Z += s.measurement_density(XY, np.concatenate((m, c), axis=0))
         return Z

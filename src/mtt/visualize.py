@@ -44,27 +44,8 @@ def plot_mtt(sensor_imgs, position_imgs, info):
 
 
 if __name__ == "__main__":
-    init_simulator = lambda: Simulator(
-        width=1000,
-        n_targets=10,
-        target_lifetime=5,
-        clutter_rate=10,
-        p_detection=0.95,
-        sigma_motion=0.5,
-        sigma_initial_state=(10.0, 10.0),
-        n_sensors=3,
-        sensor_range=500,
-        noise_range=20.0,
-        noise_bearing=0.2,
-        dt=0.1,
-    )
-    dataset = OnlineDataset(
-        n_steps=200,
-        length=20,
-        img_size=256,
-        init_simulator=init_simulator,
-        sigma_position=0.01,
-    )
+    init_simulator = lambda: Simulator()
+    dataset = OnlineDataset(init_simulator=init_simulator, n_steps=100)
     data = list(dataset)
 
     def draw_frame(data):
