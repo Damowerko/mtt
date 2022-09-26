@@ -9,7 +9,7 @@ from mtt.utils import gaussian
 rng = np.random.default_rng()
 
 
-def find_peaks(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+def find_peaks(image: np.ndarray, width: float) -> Tuple[np.ndarray, np.ndarray]:
     """
     Find peaks in the `image` by fitting a GMM.
     To fit the mixture we randomly sample points in the image weighted by the intensity.
@@ -29,7 +29,7 @@ def find_peaks(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     n_components = int(np.round(image.sum()))
 
     # Sample image based on pixel values.
-    samples = sample_image(image)
+    samples = sample_image(image, width)
 
     # Fit gaussian mixture model to find peaks.
     means, covariances = fit_gmm(samples, n_components=n_components)
@@ -37,11 +37,14 @@ def find_peaks(image: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     return means, covariances
 
 
-def sample_image(img: np.ndarray) -> np.ndarray:
+def sample_image(img: np.ndarray, width: float) -> np.ndarray:
     """
     Sample `img` based on pixel values.
     """
-    X, Y = np.meshgrid(np.arange(img.shape[1]), np.arange(img.shape[0]))
+    X, Y = np.meshgrid(
+        np.linspace(-width / 2, width / 2, img.shape[1]),
+        np.linspace(-width / 2, width / 2, img.shape[0]),
+    )
     XY = np.stack([X, Y], axis=-1)
 
     # add epsilon to avoid division by zero
@@ -94,7 +97,7 @@ def main():
         z = gaussian(XY, p, cov)
         img += z / np.sum(z)
 
-    samples = sample_image(img)
+    samples = sample_image(img, width)
     n_components = int(np.round(img.sum()))
     means, covariances = fit_gmm(samples, n_components)
 
@@ -105,16 +108,21 @@ def main():
 
     fig, ax = plt.subplots(1, 3, figsize=(12, 4))
     # make plots of original, samples and GMM
-    ax[0].imshow(img)
+    ax[0].imshow(img, cmap="gray_r", origin="lower")
+    # ax[0].scatter(positions[:, 0], positions[:, 1], s=1)
     ax[0].set_title("Original")
+    ax[1].set_xlim(-width / 2, width / 2)
+    ax[1].set_ylim(-width / 2, width / 2)
 
     ax[1].scatter(samples[:, 0], samples[:, 1], s=1)
     ax[1].set_title("Samples")
-    ax[1].set_xlim(0, img_size)
-    ax[1].set_ylim(0, img_size)
+    ax[1].set_xlim(-width / 2, width / 2)
+    ax[1].set_ylim(-width / 2, width / 2)
 
-    ax[2].imshow(img_hat)
+    ax[2].imshow(img_hat, cmap="gray_r", origin="lower")
     ax[2].set_title("GMM")
+    ax[1].set_xlim(-width / 2, width / 2)
+    ax[1].set_ylim(-width / 2, width / 2)
 
     plt.savefig("figures/peaks.png")
 
