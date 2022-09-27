@@ -5,18 +5,13 @@ description = "Multi target tracking."
 authors = ["Damian Owerko <damowerko@gmail.com>"]
 readme = "README.md"
 
-[[tool.poetry.source]]
-name = "pytorch"
-url = "https://eternalphane.github.io/pytorch-pypi/"
-
 [tool.poetry.dependencies]
 python = "^3.9,<3.11"
 numpy = "^1.22.1"
 matplotlib = "^3.5.1"
 PySide6 = "^6.2.2.1"
-torch = "1.10.1+cu113"
-pytorch-lightning = "^1.5.9"
-torchinfo = "^1.6.3"
+torch = {url = "https://download.pytorch.org/whl/cu116/torch-1.12.1%2Bcu116-cp39-cp39-linux_x86_64.whl"}
+pytorch-lightning = "^1.7.5"
 pandas = "<1.2"
 scikit-learn = "^1.1.2"
 imageio = "^2.21.3"
