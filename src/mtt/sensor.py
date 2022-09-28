@@ -1,7 +1,8 @@
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
+import torch
 
-from mtt.utils import to_cartesian, to_polar
+from mtt.utils import to_cartesian, to_polar, to_polar_torch
 
 rng = np.random.default_rng()
 
@@ -73,6 +74,27 @@ class Sensor:
             delta_theta = (rtheta[..., 1] - target_theta + np.pi) % (2 * np.pi) - np.pi
             Z += (
                 np.exp(
+                    -0.5
+                    * (
+                        delta_r ** 2 / self.noise[0] ** 2
+                        + delta_theta ** 2 / self.noise[1] ** 2
+                    )
+                )
+                / (np.sqrt(2 * np.pi) * self.noise[0] * self.noise[1])
+                / rtheta[..., 0]
+            )
+        return Z
+
+    def measurement_density_torch(self, XY, target_measurements, device=None) -> torch.Tensor:
+        Z = torch.zeros(XY.shape[:-1], device=device)
+        sensor_position = torch.as_tensor(self.position, device=device)
+        rtheta = to_polar_torch(XY - sensor_position)
+        target_rthetas = to_polar_torch(target_measurements - sensor_position)
+        for target_r, target_theta in target_rthetas.reshape(-1, 2):
+            delta_r = torch.abs(rtheta[..., 0] - target_r)
+            delta_theta = (rtheta[..., 1] - target_theta + np.pi) % (2 * np.pi) - np.pi
+            Z += (
+                torch.exp(
                     -0.5
                     * (
                         delta_r ** 2 / self.noise[0] ** 2

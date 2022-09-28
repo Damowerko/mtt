@@ -1,7 +1,6 @@
 from collections import deque
 from typing import Callable, Optional
 from concurrent.futures import ProcessPoolExecutor
-from copy import deepcopy
 
 import numpy as np
 import torch
@@ -63,17 +62,14 @@ class OnlineDataset(IterableDataset):
             clutter,
         ) in self.iter_simulation(simulator):
             sensor_imgs.append(
-                torch.Tensor(
-                    simulator.measurement_image(self.img_size, measurements, clutter)
-                )
+                simulator.measurement_image_torch(self.img_size, measurements, clutter, device="cuda")
             )
             position_imgs.append(
-                torch.Tensor(
-                    simulator.position_image(
-                        self.img_size,
-                        self.sigma_position,
-                        target_positions,
-                    )
+                simulator.position_image_torch(
+                    self.img_size,
+                    self.sigma_position,
+                    target_positions,
+                    device="cuda"
                 )
             )
             infos.append(

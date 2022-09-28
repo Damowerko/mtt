@@ -2,6 +2,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
+import torch
 
 
 def to_cartesian(val) -> NDArray[np.float64]:
@@ -27,6 +28,17 @@ def to_polar(val) -> NDArray[np.float64]:
     r = np.linalg.norm(val, axis=1)
     theta = np.arctan2(val[:, 1], val[:, 0])
     return np.stack([r, theta], axis=1).reshape(shape)
+
+def to_polar_torch(val) -> torch.Tensor:
+    """
+    Convert cartesion coordinates to polar coordinates.
+    """
+    val = torch.as_tensor(val, dtype=torch.float64)
+    shape = val.shape
+    val = val.reshape(-1, 2)
+    r = torch.norm(val, dim=1)
+    theta = torch.atan2(val[:, 1], val[:, 0])
+    return torch.stack([r, theta], dim=1).reshape(shape)
 
 
 def gaussian(XY, mu, cov):

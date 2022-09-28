@@ -91,8 +91,8 @@ def main():
     img = np.zeros((img_size, img_size))
     for p in positions:
         cov = [
-            [rng.uniform(50, 100), 0],
-            [0, rng.uniform(50, 100)],
+            [rng.uniform(50, 100), rng.uniform(0, 50)],
+            [rng.uniform(0, 50), rng.uniform(50, 100)],
         ]
         z = gaussian(XY, p, cov)
         img += z / np.sum(z)
@@ -108,7 +108,7 @@ def main():
 
     fig, ax = plt.subplots(1, 3, figsize=(12, 4))
     # make plots of original, samples and GMM
-    ax[0].imshow(img, cmap="gray_r", origin="lower")
+    ax[0].imshow(img, cmap="gray_r", origin="lower", extent=[-width / 2, width / 2] * 2)
     # ax[0].scatter(positions[:, 0], positions[:, 1], s=1)
     ax[0].set_title("Original")
     ax[1].set_xlim(-width / 2, width / 2)
@@ -119,7 +119,7 @@ def main():
     ax[1].set_xlim(-width / 2, width / 2)
     ax[1].set_ylim(-width / 2, width / 2)
 
-    ax[2].imshow(img_hat, cmap="gray_r", origin="lower")
+    ax[2].imshow(img_hat, cmap="gray_r", origin="lower", extent=[-width / 2, width / 2] * 2)
     ax[2].set_title("GMM")
     ax[1].set_xlim(-width / 2, width / 2)
     ax[1].set_ylim(-width / 2, width / 2)
