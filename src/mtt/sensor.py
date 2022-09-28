@@ -41,7 +41,7 @@ class Sensor:
         detected = rng.uniform(size=len(target_positions)) < self.p_detection
         detected &= (
             np.linalg.norm(target_positions - self.position[None, :], axis=1)
-            < self.range_max
+            <= self.range_max
         )
         target_positions = target_positions[detected]
 
