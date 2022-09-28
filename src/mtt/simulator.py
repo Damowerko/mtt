@@ -1,7 +1,10 @@
-from typing import List, Optional, Sequence, Tuple, Union
+from typing import List, Optional, Sequence, Union
+
 import numpy as np
-from mtt.target import Target
+import torch
+
 from mtt.sensor import Sensor
+from mtt.target import Target
 from mtt.utils import to_cartesian
 
 rng = np.random.default_rng()
@@ -170,10 +173,34 @@ class Simulator:
         X, Y = np.meshgrid(
             np.linspace(-self.window / 2, self.window / 2, size),
             np.linspace(-self.window / 2, self.window / 2, size),
+            indexing="ij",
         )
         Z = np.zeros((size, size))
         for i in range(x.shape[0]):
             Z += np.exp(-((X - x[i, 0]) ** 2 + (Y - x[i, 1]) ** 2) * 0.5 / sigma ** 2)
+        return Z
+
+    def position_image_torch(
+        self, size: int, sigma: float, target_positions: np.ndarray, device=None
+    ):
+        """
+        Create an image of the targets at the given positions.
+
+        Args:
+            size: The withd and height of the image.
+            sigma: The size of the position blob.
+            target_positions: (N,2) The positions of the targets.
+            device: The device to move the tensor to.
+        """
+        x = torch.from_numpy(target_positions).to(device=device)
+        # only consider measurements in windows
+        x = x[torch.all(x.abs() < self.window / 2, dim=1)]
+        X, Y = torch.meshgrid(torch.linspace(-self.window / 2, self.window / 2, size), torch.linspace(-self.window / 2, self.window / 2, size), indexing="ij")
+        Z = torch.zeros((size, size), device=device)
+        for i in range(x.shape[0]):
+            Z += torch.exp(
+                -((X - x[i, 0]) ** 2 + (Y - x[i, 1]) ** 2) * 0.5 / sigma ** 2
+            )
         return Z
 
     def measurement_image(
@@ -196,8 +223,39 @@ class Simulator:
             clutter = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
         x = np.linspace(-self.window / 2, self.window / 2, size)
         y = np.linspace(-self.window / 2, self.window / 2, size)
-        XY = np.stack(np.meshgrid(x, y), axis=2)
+        XY = np.stack(np.meshgrid(x, y, indexing="ij"), axis=2)
         Z = np.zeros((size, size))
         for s, m, c in zip(self.sensors, target_measurements, clutter):
             Z += s.measurement_density(XY, np.concatenate((m, c), axis=0))
+        return Z
+
+    def measurement_image_torch(
+        self,
+        size: int,
+        target_measurements: Optional[List[np.ndarray]] = None,
+        clutter: Optional[List[np.ndarray]] = None,
+        device=None,
+    ):
+        """
+        Image of the density function.
+
+        Args:
+            size int: the width and height of the image.
+            target_measurements: list of (N_i, 2) the x,y measurements for each target.
+            clutter: list of (N_i, 2) the x,y positions of the clutter.
+        """
+        if target_measurements is None:
+            target_measurements = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
+        _target_measurements = [torch.from_numpy(m).to(device=device) for m in target_measurements]
+        if clutter is None:
+            clutter = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
+        _clutter = [torch.from_numpy(c).to(device=device) for c in clutter]
+
+
+        x = torch.linspace(-self.window / 2, self.window / 2, size, device=device)
+        y = torch.linspace(-self.window / 2, self.window / 2, size, device=device)
+        XY = torch.stack(torch.meshgrid(x, y, indexing="ij"), dim=2)
+        Z = torch.zeros((size, size), device=device)
+        for s, m, c in zip(self.sensors, _target_measurements, _clutter):
+            Z += s.measurement_density_torch(XY, torch.concat((m, c), dim=0), device=device)
         return Z
