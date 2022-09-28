@@ -19,7 +19,7 @@ class Simulator:
         model="CV",
         sigma_motion: float = 1.0,
         sigma_initial_state: Sequence[float] = (50.0,),
-        n_sensors: float = 1.0,
+        n_sensors: float = 0.25,
         sensor_range: float = 2000,
         noise_range: float = 10.0,
         noise_bearing: float = 0.035,
@@ -129,7 +129,7 @@ class Simulator:
         n_birth = rng.poisson(self.birth_rate * self.area * self.dt)
         self.targets += [self.init_target() for _ in range(n_birth)]
 
-    def measurements(self):
+    def measurements(self) -> List[np.ndarray]:
         measurements = []
         for sensor in self.sensors:
             measurements.append(sensor.measure(self.positions))
@@ -199,8 +199,5 @@ class Simulator:
         XY = np.stack(np.meshgrid(x, y), axis=2)
         Z = np.zeros((size, size))
         for s, m, c in zip(self.sensors, target_measurements, clutter):
-            m = m[(np.abs(m) < self.window / 2).all(axis=1)]
-            c = c[(np.abs(c) < self.window / 2).all(axis=1)]
-
             Z += s.measurement_density(XY, np.concatenate((m, c), axis=0))
         return Z

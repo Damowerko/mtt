@@ -1,6 +1,7 @@
 from collections import deque
 from typing import Callable, Optional
 from concurrent.futures import ProcessPoolExecutor
+from copy import deepcopy
 
 import numpy as np
 import torch
@@ -12,7 +13,7 @@ from mtt.simulator import Simulator
 class OnlineDataset(IterableDataset):
     def __init__(
         self,
-        n_steps: int = 1000,
+        n_steps: int = 100,
         length: int = 20,
         img_size: int = 128,
         sigma_position: float = 10.0,
@@ -25,7 +26,7 @@ class OnlineDataset(IterableDataset):
             length: Number of time steps to include in each sample.
             img_size: Size of the image to generate.
             sigma_position: Standard deviation of the Gaussian used to generate the target image.
-            init_simulator: Function used to initialize the simulator.
+            init_simulator: Function used to initialize the simulator, should **not** be a lambda.
         """
         super().__init__()
         self.n_steps = n_steps
@@ -38,10 +39,16 @@ class OnlineDataset(IterableDataset):
         simulator = self.init_simulator() if simulator is None else simulator
         for _ in range(self.n_steps):
             simulator.update()
-            target_positions = simulator.positions
+            # get target positions within the window
+            target_positions = simulator.positions[(np.abs(simulator.positions) <= simulator.window / 2).any(axis=1)]
+            # sensors can be outside of the window and make detections
             sensor_positions = np.stack([s.position for s in simulator.sensors], axis=0)
-            measurements = simulator.measurements()
+            # get measurements and clutter within the window
+            measurements =  simulator.measurements()
             clutter = simulator.clutter()
+            for i in range(len(measurements)):
+                measurements[i] = measurements[i][(np.abs(measurements[i]) <= simulator.window / 2).any(axis=1)]
+                clutter[i] = clutter[i][(np.abs(clutter[i]) <= simulator.window / 2).any(axis=1)]
             yield target_positions, sensor_positions, measurements, clutter
 
     def __iter__(self):
@@ -93,12 +100,13 @@ class OnlineDataset(IterableDataset):
             list(infos for _, _, infos in batch),
         )
 
+def _generate_data(online_dataset: OnlineDataset):
+    return list(online_dataset.iter_simulation())
 
 def generate_data(online_dataset: OnlineDataset, n_simulations=10):
-    with ProcessPoolExecutor() as executor:
-        futures = [
-            executor.submit(lambda: list(online_dataset.iter_simulation()))
-            for _ in range(n_simulations)
-        ]
-        for future in futures:
-            yield from future.result()
+    futures = []
+    with ProcessPoolExecutor() as e:
+        for _ in range(n_simulations):
+            f = e.submit(_generate_data, online_dataset)
+            futures.append(f)
+    return [f.result() for f in futures]
