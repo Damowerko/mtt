@@ -15,18 +15,18 @@ class Simulator:
         self,
         window: float = 1000,
         width: Union[float, None] = None,
-        n_targets: float = 10,
-        target_lifetime: float = 10,
-        n_clutter: float = 40,
+        p_birth: float = 0.5,
+        p_survival: float = 0.95,
         p_detection: float = 0.95,
+        n_sensors: float = 0.25,
+        n_clutter: float = 40,
         model="CV",
         sigma_motion: float = 1.0,
         sigma_initial_state: Sequence[float] = (50.0,),
-        n_sensors: float = 0.25,
         sensor_range: float = 2000,
         noise_range: float = 10.0,
         noise_bearing: float = 0.035,
-        dt: float = 0.1,
+        dt: float = 1.0,
     ):
         """
         Args:
@@ -46,22 +46,26 @@ class Simulator:
         """
         self.window = window
         self.width = window + 2 * sensor_range if width is None else width
-        self.area = self.width ** 2 / 1000 ** 2
+        self.area = self.width**2 / 1000**2
 
-        self.survival_rate = 1 - 1 / target_lifetime
-        self.birth_rate = n_targets / target_lifetime
+        self.p_survival = p_survival
+        self.p_birth = p_birth
         self.n_clutter = n_clutter
         self.p_detection = p_detection
-
         self.sigma_motion = sigma_motion
         self.sigma_initial_state = sigma_initial_state
         self.dt = dt
         self.model = model
 
+        # The lifetime of a target is geometric with p_death=(1-p_survival)
+        # this distribution has mean 1/p_death = 1/(1-p_survival)
+        n_targets = p_birth / (1 - p_survival)
+        # make sure there is at least one target? TODO: check this
         self.targets = [
             self.init_target()
             for i in range(1 + rng.poisson(n_targets * self.area - 1))
         ]
+        # make sure there is at least one sensor? TODO: check this
         self.sensors = [
             self.init_sensor(sensor_range, noise_range, noise_bearing)
             for _ in range(1 + rng.poisson(n_sensors * self.area - 1))
@@ -123,13 +127,13 @@ class Simulator:
             target.update(self.dt)
 
         # Target survival
-        survival = rng.uniform(size=len(self.targets)) < self.survival_rate ** self.dt
+        survival = rng.uniform(size=len(self.targets)) < self.p_survival
         self.targets = [
             target for target, alive in zip(self.targets, survival) if alive
         ]
 
         # Target birth
-        n_birth = rng.poisson(self.birth_rate * self.area * self.dt)
+        n_birth = rng.poisson(self.p_birth * self.area)
         self.targets += [self.init_target() for _ in range(n_birth)]
 
     def measurements(self) -> List[np.ndarray]:
@@ -167,18 +171,18 @@ class Simulator:
             sigma: The size of the position blob.
             target_positions: (N,2) The positions of the targets.
         """
-        x = target_positions
+        x, y = target_positions.T
         # only consider measurements in windows
-        x = x[(np.abs(x) < self.window / 2).all(axis=1)]
         X, Y = np.meshgrid(
             np.linspace(-self.window / 2, self.window / 2, size),
             np.linspace(-self.window / 2, self.window / 2, size),
             indexing="ij",
         )
-        Z = np.zeros((size, size))
-        for i in range(x.shape[0]):
-            Z += np.exp(-((X - x[i, 0]) ** 2 + (Y - x[i, 1]) ** 2) * 0.5 / sigma ** 2)
-        return Z
+        dx = X.reshape(-1, 1) - x.reshape(1, -1)
+        dy = Y.reshape(-1, 1) - y.reshape(1, -1)
+        Z = np.exp(-(dx**2 + dy**2) * 0.5 / sigma**2).sum(axis=1)
+        Z /= np.sqrt(2 * np.pi * sigma**2)
+        return Z.reshape((size, size)).T  # transpose to match image coordinates
 
     def position_image_torch(
         self, size: int, sigma: float, target_positions: np.ndarray, device=None
@@ -192,16 +196,18 @@ class Simulator:
             target_positions: (N,2) The positions of the targets.
             device: The device to move the tensor to.
         """
-        x = torch.from_numpy(target_positions).to(device=device)
+        x, y = torch.as_tensor(target_positions, device=device).T
         # only consider measurements in windows
-        x = x[torch.all(x.abs() < self.window / 2, dim=1)]
-        X, Y = torch.meshgrid(torch.linspace(-self.window / 2, self.window / 2, size), torch.linspace(-self.window / 2, self.window / 2, size), indexing="ij")
-        Z = torch.zeros((size, size), device=device)
-        for i in range(x.shape[0]):
-            Z += torch.exp(
-                -((X - x[i, 0]) ** 2 + (Y - x[i, 1]) ** 2) * 0.5 / sigma ** 2
-            )
-        return Z
+        X, Y = torch.meshgrid(
+            torch.linspace(-self.window / 2, self.window / 2, size, device=device),
+            torch.linspace(-self.window / 2, self.window / 2, size, device=device),
+            indexing="ij",
+        )
+        dx = X.reshape(-1, 1) - x.reshape(1, -1)
+        dy = Y.reshape(-1, 1) - y.reshape(1, -1)
+        Z = torch.exp(-(dx**2 + dy**2) * 0.5 / sigma**2).sum(dim=1)
+        Z /= (2.0 * torch.pi * sigma**2) ** 0.5
+        return Z.reshape((size, size)).T  # transpose to match image coordinates
 
     def measurement_image(
         self,
@@ -227,7 +233,7 @@ class Simulator:
         Z = np.zeros((size, size))
         for s, m, c in zip(self.sensors, target_measurements, clutter):
             Z += s.measurement_density(XY, np.concatenate((m, c), axis=0))
-        return Z
+        return Z.T  # transpose to match image coordinates
 
     def measurement_image_torch(
         self,
@@ -246,16 +252,19 @@ class Simulator:
         """
         if target_measurements is None:
             target_measurements = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
-        _target_measurements = [torch.from_numpy(m).to(device=device) for m in target_measurements]
+        _target_measurements = [
+            torch.from_numpy(m).to(device=device) for m in target_measurements
+        ]
         if clutter is None:
             clutter = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
         _clutter = [torch.from_numpy(c).to(device=device) for c in clutter]
-
 
         x = torch.linspace(-self.window / 2, self.window / 2, size, device=device)
         y = torch.linspace(-self.window / 2, self.window / 2, size, device=device)
         XY = torch.stack(torch.meshgrid(x, y, indexing="ij"), dim=2)
         Z = torch.zeros((size, size), device=device)
         for s, m, c in zip(self.sensors, _target_measurements, _clutter):
-            Z += s.measurement_density_torch(XY, torch.concat((m, c), dim=0), device=device)
-        return Z
+            Z += s.measurement_density_torch(
+                XY, torch.concat((m, c), dim=0), device=device
+            )
+        return Z.T  # transpose to match image coordinates

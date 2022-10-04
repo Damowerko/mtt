@@ -2,13 +2,15 @@ import argparse
 import os
 from typing import Union
 
+import torch
 import pytorch_lightning as pl
-from mtt.data import OnlineDataset
-from mtt.models import Conv2dCoder, Conv3dCoder, EncoderDecoder
-from mtt.simulator import Simulator
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
+
+from mtt.data import OnlineDataset
+from mtt.models import Conv2dCoder, Conv3dCoder, EncoderDecoder
+from mtt.simulator import Simulator
 
 
 def get_model_cls(model_type) -> EncoderDecoder:
@@ -22,8 +24,11 @@ def get_model_cls(model_type) -> EncoderDecoder:
     return models[model_type]
 
 
+def init_simulator():
+    return Simulator()
+
+
 def get_dataset(params: argparse.Namespace, n_steps=1000) -> OnlineDataset:
-    init_simulator = lambda: Simulator()
     return OnlineDataset(
         length=params.input_length,
         init_simulator=init_simulator,
@@ -79,13 +84,16 @@ def train(params: argparse.Namespace):
     train_loader = DataLoader(
         train_dataset,
         batch_size=params.batch_size,
-        num_workers=params.batch_size,
+        num_workers=params.batch_size * 2,
+        persistent_workers=True,
         pin_memory=True,
         collate_fn=train_dataset.collate_fn,
     )
     test_loader = DataLoader(
         test_dataset,
         batch_size=params.batch_size,
+        num_workers=params.batch_size * 2,
+        persistent_workers=True,
         pin_memory=True,
         collate_fn=train_dataset.collate_fn,
     )
@@ -100,7 +108,6 @@ def test(params: argparse.Namespace):
     test_loader = DataLoader(
         dataset,
         batch_size=1,
-        pin_memory=True,
         collate_fn=dataset.collate_fn,
     )
     trainer = get_trainer(params)

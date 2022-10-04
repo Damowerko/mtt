@@ -49,9 +49,7 @@ def sample_image(img: np.ndarray, width: float) -> np.ndarray:
 
     # add epsilon to avoid division by zero
     img = img + 1e-8
-    idx = rng.choice(
-        img.size, size=img.size, p=img.reshape(-1) / img.sum(), shuffle=False
-    )
+    idx = rng.choice(img.size, size=1000, p=img.reshape(-1) / img.sum(), shuffle=False)
     return XY.reshape(-1, 2)[idx]
 
 
@@ -119,7 +117,9 @@ def main():
     ax[1].set_xlim(-width / 2, width / 2)
     ax[1].set_ylim(-width / 2, width / 2)
 
-    ax[2].imshow(img_hat, cmap="gray_r", origin="lower", extent=[-width / 2, width / 2] * 2)
+    ax[2].imshow(
+        img_hat, cmap="gray_r", origin="lower", extent=[-width / 2, width / 2] * 2
+    )
     ax[2].set_title("GMM")
     ax[1].set_xlim(-width / 2, width / 2)
     ax[1].set_ylim(-width / 2, width / 2)

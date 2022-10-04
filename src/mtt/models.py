@@ -95,7 +95,7 @@ class EncoderDecoder(pl.LightningModule):
         assert output_img.shape == target_img.shape
         loss = self.loss(output_img, target_img)
         self.log("val/loss", loss, prog_bar=True)
-        self.log("val/ospa", self.ospa(batch), prog_bar=True)
+        # self.log("val/ospa", self.ospa(batch), prog_bar=True)
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
     def test_step(self, batch, *_):
@@ -167,7 +167,7 @@ class Conv2dCoder(EncoderDecoder):
         kernel_size: int = 9,
         dilation: int = 1,
         batch_norm: bool = True,
-        activation: str = "relu",
+        activation: str = "leaky_relu",
         **kwargs,
     ):
         super().__init__(**kwargs)
