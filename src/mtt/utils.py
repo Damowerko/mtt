@@ -29,6 +29,7 @@ def to_polar(val) -> NDArray[np.float64]:
     theta = np.arctan2(val[:, 1], val[:, 0])
     return np.stack([r, theta], axis=1).reshape(shape)
 
+
 def to_polar_torch(val) -> torch.Tensor:
     """
     Convert cartesion coordinates to polar coordinates.
@@ -93,7 +94,7 @@ def ospa(X: np.ndarray, Y: np.ndarray, cutoff: float, p: int = 2) -> float:
 
     dist = cdist(X, Y, metric="minkowski", p=p) ** p
     xidx, yidx = linear_sum_assignment(dist)
-    cost: float = np.minimum(dist[xidx, yidx], cutoff ** p).sum()
+    cost: float = np.minimum(dist[xidx, yidx], cutoff**p).sum()
     # since m <= n, for any unassigned y we have a cost of cutoff
-    cost += cutoff ** p * (n - m)
+    cost += cutoff**p * (n - m)
     return (cost / n) ** (1 / p)
