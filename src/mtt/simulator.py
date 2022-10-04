@@ -161,30 +161,6 @@ class Simulator:
         return clutter
 
     def position_image(
-        self, size: int, sigma: float, target_positions: np.ndarray
-    ) -> np.ndarray:
-        """
-        Create an image of the targets at the given positions.
-
-        Args:
-            size: The withd and height of the image.
-            sigma: The size of the position blob.
-            target_positions: (N,2) The positions of the targets.
-        """
-        x, y = target_positions.T
-        # only consider measurements in windows
-        X, Y = np.meshgrid(
-            np.linspace(-self.window / 2, self.window / 2, size),
-            np.linspace(-self.window / 2, self.window / 2, size),
-            indexing="ij",
-        )
-        dx = X.reshape(-1, 1) - x.reshape(1, -1)
-        dy = Y.reshape(-1, 1) - y.reshape(1, -1)
-        Z = np.exp(-(dx**2 + dy**2) * 0.5 / sigma**2).sum(axis=1)
-        Z /= np.sqrt(2 * np.pi * sigma**2)
-        return Z.reshape((size, size)).T  # transpose to match image coordinates
-
-    def position_image_torch(
         self, size: int, sigma: float, target_positions: np.ndarray, device=None
     ):
         """
@@ -210,32 +186,6 @@ class Simulator:
         return Z.reshape((size, size)).T  # transpose to match image coordinates
 
     def measurement_image(
-        self,
-        size: int,
-        target_measurements: Optional[List[np.ndarray]] = None,
-        clutter: Optional[List[np.ndarray]] = None,
-    ):
-        """
-        Image of the density function.
-
-        Args:
-            size int: the width and height of the image.
-            target_measurements: list of (N_i, 2) the x,y measurements for each target.
-            clutter: list of (N_i, 2) the x,y positions of the clutter.
-        """
-        if target_measurements is None:
-            target_measurements = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
-        if clutter is None:
-            clutter = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
-        x = np.linspace(-self.window / 2, self.window / 2, size)
-        y = np.linspace(-self.window / 2, self.window / 2, size)
-        XY = np.stack(np.meshgrid(x, y, indexing="ij"), axis=2)
-        Z = np.zeros((size, size))
-        for s, m, c in zip(self.sensors, target_measurements, clutter):
-            Z += s.measurement_density(XY, np.concatenate((m, c), axis=0))
-        return Z.T  # transpose to match image coordinates
-
-    def measurement_image_torch(
         self,
         size: int,
         target_measurements: Optional[List[np.ndarray]] = None,
