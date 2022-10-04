@@ -72,16 +72,26 @@ class OnlineDataset(IterableDataset):
                 clutter,
                 _,
             ) in self.iter_simulation(simulator):
-                yield make_image_data(
-                    target_positions,
-                    sensor_positions,
+                sensor_img = simulator.measurement_image(
+                    self.img_size,
                     measurements,
                     clutter,
-                    simulator,
+                    device=self.device,
+                )
+                position_img = simulator.position_image(
                     self.img_size,
                     self.sigma_position,
-                    self.device,
+                    target_positions,
+                    device=self.device,
                 )
+                info = dict(
+                    target_positions=target_positions,
+                    sensor_positions=sensor_positions,
+                    measurements=measurements,
+                    clutter=clutter,
+                    window=simulator.window,
+                )
+                yield sensor_img, position_img, info
 
     def __iter__(self):
         simulator = self.init_simulator()
@@ -106,35 +116,6 @@ class OnlineDataset(IterableDataset):
             torch.stack(tuple(positions_imgs for _, positions_imgs, _ in batch)),
             list(infos for _, _, infos in batch),
         )
-
-
-def make_image_data(
-    target_positions: np.ndarray,
-    sensor_positions: np.ndarray,
-    measurements: List[np.ndarray],
-    clutter: List[np.ndarray],
-    simulator: Simulator,
-    img_size: int = 128,
-    sigma_position: float = 10.0,
-    device: str = "cpu",
-):
-    sensor_img = simulator.measurement_image_torch(
-        img_size, measurements, clutter, device=device
-    )
-    position_img = simulator.position_image_torch(
-        img_size,
-        sigma_position,
-        target_positions,
-        device=device,
-    )
-    info = dict(
-        target_positions=target_positions,
-        sensor_positions=sensor_positions,
-        measurements=measurements,
-        clutter=clutter,
-        window=simulator.window,
-    )
-    yield sensor_img, position_img, info
 
 
 def _generate_data(online_dataset: OnlineDataset, images=False):
