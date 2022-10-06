@@ -225,6 +225,11 @@ class Conv2dCoder(EncoderDecoder):
             output_padding = desired_shape - actual_shape
 
             decoder_layers += [
+                (
+                    nn.BatchNorm2d(decoder_channels[i + 1])
+                    if batch_norm
+                    else nn.Identity()
+                ),
                 nn.ConvTranspose2d(
                     decoder_channels[i],
                     decoder_channels[i + 1],
@@ -233,11 +238,6 @@ class Conv2dCoder(EncoderDecoder):
                     padding,
                     tuple(output_padding),
                     dilation=dilation,
-                ),
-                (
-                    nn.BatchNorm2d(decoder_channels[i + 1])
-                    if batch_norm
-                    else nn.Identity()
                 ),
                 _activation(),
             ]
@@ -248,12 +248,12 @@ class Conv2dCoder(EncoderDecoder):
         hidden_layers = []
         for i in range(n_hidden + 1):
             hidden_layers += [
-                nn.Conv2d(hidden_channels[i], hidden_channels[i + 1], 1),
                 (
                     nn.BatchNorm2d(hidden_channels[i + 1])
                     if batch_norm
                     else nn.Identity()
                 ),
+                nn.Conv2d(hidden_channels[i], hidden_channels[i + 1], 1),
                 _activation(),
             ]
         self.hidden = nn.Sequential(*hidden_layers)
@@ -264,94 +264,4 @@ class Conv2dCoder(EncoderDecoder):
         x = self.hidden(x)
         # x = x.view((-1, self.hparams.n_channels) + self.embedding_shape)
         x = self.decoder(x)
-        return x
-
-
-class Conv3dCoder(EncoderDecoder):
-    def __init__(
-        self,
-        n_encoder: int = 3,
-        n_hidden: int = 2,
-        n_channels: int = 8,
-        kernel_time: int = 3,
-        kernel_space: int = 9,
-        dilation_space: int = 1,
-        **kwargs,
-    ):
-        super().__init__(**kwargs)
-        self.save_hyperparameters()
-
-        padding = (kernel_time,) + ((kernel_space - 1) // 2,) * 2
-        kernel_size = (kernel_time, kernel_space, kernel_space)
-        stride = (1, 2, 2)
-        dilation = (1, dilation_space, dilation_space)
-
-        # initialize the encoder and decoder layers
-        # the input layer has one channel
-        encoder_channels = [1] + [n_channels] * n_encoder
-        encoder_shapes = [self.input_shape[1:]]
-        encoder_layers = []
-        for i in range(len(encoder_channels) - 1):
-            encoder_shapes.append(
-                conv_output(encoder_shapes[-1], kernel_size, stride, padding, dilation)
-            )
-            encoder_layers += [
-                nn.Conv3d(
-                    encoder_channels[i],
-                    encoder_channels[i + 1],
-                    kernel_size,
-                    stride,
-                    padding,
-                    dilation,
-                ),
-                nn.ReLU(True),
-            ]
-        self.encoder = nn.Sequential(*encoder_layers)
-
-        # the decoder layers are analogous to the encoder layers but in reverse
-        decoder_shapes = encoder_shapes[::-1]
-        decoder_channels = [n_channels] * n_encoder + [1]
-        decoder_layers = []
-        for i in range(len(decoder_channels) - 1):
-            # specify output_padding to resolve output shape ambiguity when stride > 1
-            input_shape = np.asarray(decoder_shapes[i], dtype=np.int32)
-            desired_shape = np.asarray(decoder_shapes[i + 1], dtype=np.int32)
-            actual_shape = conv_transpose_output(
-                input_shape, kernel_size, stride, padding, dilation
-            )
-            output_padding = desired_shape - input_shape
-
-            decoder_layers += [
-                nn.ConvTranspose3d(
-                    decoder_channels[i],
-                    decoder_channels[i + 1],
-                    kernel_size,
-                    stride,
-                    padding,
-                    tuple(output_padding),
-                    dilation=dilation,
-                ),
-                nn.ReLU(True) if i < len(decoder_channels) - 2 else nn.Identity(),
-            ]
-        self.decoder = nn.Sequential(*decoder_layers)
-
-        # initialize the hidden layers
-        self.embedding_shape = encoder_shapes[-1]
-        self.embedding_size = np.prod(self.embedding_shape)
-        self.hiden_layers = []
-        for i in range(n_hidden):
-            self.hiden_layers += [
-                nn.Linear(self.embedding_size, self.embedding_size),
-                nn.ReLU(True),
-            ]
-        self.hidden = nn.Sequential(*self.hiden_layers)
-
-    def forward(self, x):
-        x = x.view((-1, 1) + self.input_shape).tranpose(1, 2)
-        x = self.encoder(x)
-        x = x.view(-1, self.embedding_size)
-        x = self.hidden(x)
-        x = x.view((-1, self.n_channels) + self.embedding_shape)
-        x = self.decoder(x)
-        x = x.view((-1,) + self.output_shape)
         return x

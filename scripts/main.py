@@ -9,14 +9,13 @@ from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
 from mtt.data import OnlineDataset
-from mtt.models import Conv2dCoder, Conv3dCoder, EncoderDecoder
+from mtt.models import Conv2dCoder, EncoderDecoder
 from mtt.simulator import Simulator
 
 
-def get_model_cls(model_type) -> EncoderDecoder:
+def get_model_cls(model_type: str) -> EncoderDecoder:
     models = {
         "Conv2dCoder": Conv2dCoder,
-        "Conv3dCoder": Conv3dCoder,
     }
     if model_type not in models:
         raise ValueError(f"Unknown model type: {model_type}")
