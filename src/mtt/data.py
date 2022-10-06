@@ -44,7 +44,7 @@ class OnlineDataset(IterableDataset):
             simulator.update()
             # get target positions within the window
             target_positions = simulator.positions[
-                (np.abs(simulator.positions) <= simulator.window / 2).any(axis=1)
+                (np.abs(simulator.positions) <= simulator.window / 2).all(axis=1)
             ].astype(self.dtype)
             # sensors can be outside of the window and make detections
             sensor_positions = np.stack(
@@ -55,10 +55,10 @@ class OnlineDataset(IterableDataset):
             clutter = simulator.clutter()
             for i in range(len(measurements)):
                 measurements[i] = measurements[i][
-                    (np.abs(measurements[i]) <= simulator.window / 2).any(axis=1)
+                    (np.abs(measurements[i]) <= simulator.window / 2).all(axis=1)
                 ].astype(self.dtype)
                 clutter[i] = clutter[i][
-                    (np.abs(clutter[i]) <= simulator.window / 2).any(axis=1)
+                    (np.abs(clutter[i]) <= simulator.window / 2).all(axis=1)
                 ].astype(self.dtype)
             yield target_positions, sensor_positions, measurements, clutter, simulator
 
