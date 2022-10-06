@@ -1,7 +1,7 @@
 from typing import Tuple
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.mixture import GaussianMixture
+from sklearn.mixture import GaussianMixture, BayesianGaussianMixture
 
 from mtt.utils import gaussian
 
@@ -65,7 +65,11 @@ def fit_gmm(samples: np.ndarray, n_components: int):
         raise ValueError(f"n_components must be non-negative, got {n_components}.")
 
     # Fit gaussian mixture model to find peaks.
-    gmm = GaussianMixture(n_components=n_components, covariance_type="full")
+    gmm = GaussianMixture(n_components=n_components)
+    # gmm = BayesianGaussianMixture(
+    #     n_components=n_components * 7,
+    #     weight_concentration_prior_type="dirichlet_distribution",
+    # )
     gmm.fit(samples)
     means = gmm.means_
     covariances = gmm.covariances_
