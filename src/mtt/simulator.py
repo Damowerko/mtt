@@ -19,7 +19,7 @@ class Simulator:
         p_survival: float = 0.95,
         p_detection: float = 0.95,
         n_sensors: float = 0.25,
-        n_clutter: float = 5,
+        n_clutter: float = 40,
         model="CV",
         sigma_motion: float = 1.0,
         sigma_initial_state: Sequence[float] = (5.0,),
