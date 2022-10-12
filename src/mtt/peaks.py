@@ -1,7 +1,8 @@
 from typing import Tuple
 import numpy as np
 import matplotlib.pyplot as plt
-from sklearn.mixture import GaussianMixture, BayesianGaussianMixture
+from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
+from sklearn.cluster import KMeans
 
 from mtt.utils import gaussian
 
@@ -9,7 +10,9 @@ from mtt.utils import gaussian
 rng = np.random.default_rng()
 
 
-def find_peaks(image: np.ndarray, width: float) -> Tuple[np.ndarray, np.ndarray]:
+def find_peaks(
+    image: np.ndarray, width: float, n_peaks=None
+) -> Tuple[np.ndarray, np.ndarray]:
     """
     Find peaks in the `image` by fitting a GMM.
     To fit the mixture we randomly sample points in the image weighted by the intensity.
@@ -21,12 +24,14 @@ def find_peaks(image: np.ndarray, width: float) -> Tuple[np.ndarray, np.ndarray]
         means: (n_peaks, 2) the mean of each peak.
         covariances: (n_peaks, 2, 2) the covariance of each peak.
     """
-
     # set negative pixels to zero
     image = np.maximum(image, 0)
 
-    # assuming number of peaks is approximately the sum of all pixels
-    n_components = int(np.round(image.sum()))
+    if n_peaks is None:
+        # assuming number of peaks is approximately the sum of all pixels
+        n_components = int(np.round(image.sum()) * 2.3)
+    else:
+        n_components = n_peaks
 
     # Sample image based on pixel values.
     samples = sample_image(image, width)
@@ -48,7 +53,7 @@ def sample_image(img: np.ndarray, width: float) -> np.ndarray:
     XY = np.stack([X, Y], axis=-1)
 
     # add epsilon to avoid division by zero
-    img = img + 1e-8
+    img += 1e-8
     idx = rng.choice(img.size, size=1000, p=img.reshape(-1) / img.sum(), shuffle=False)
     return XY.reshape(-1, 2)[idx]
 
@@ -64,16 +69,21 @@ def fit_gmm(samples: np.ndarray, n_components: int):
     if n_components < 0:
         raise ValueError(f"n_components must be non-negative, got {n_components}.")
 
-    # Fit gaussian mixture model to find peaks.
-    gmm = GaussianMixture(n_components=n_components)
-    # gmm = BayesianGaussianMixture(
-    #     n_components=n_components * 7,
-    #     weight_concentration_prior_type="dirichlet_distribution",
-    # )
+    # knn = KMeans(n_clusters=n_components)
+    # knn.fit(samples)
+    # means = knn.cluster_centers_
+    # return means, None
+
+    # fit kmeans
+    gmm = GaussianMixture(
+        n_components=n_components,
+        n_init=10,
+    )
     gmm.fit(samples)
     means = gmm.means_
     covariances = gmm.covariances_
-    return means, covariances
+    idx = gmm.weights_ > 0.5 / n_components
+    return means[idx], covariances[idx]
 
 
 def main():

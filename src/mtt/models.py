@@ -73,7 +73,7 @@ class EncoderDecoder(pl.LightningModule):
         raise NotImplementedError
 
     def loss(self, output_img, target_img):
-        # target_img = target_img[0, -self.hparams.output_length - 1 :]
+        target_img = target_img[:, -self.output_shape[0] - 1 :]
         if self.loss_fn == "l2":
             return F.mse_loss(output_img, target_img)
         elif self.loss_fn == "l1":
@@ -84,7 +84,6 @@ class EncoderDecoder(pl.LightningModule):
     def training_step(self, batch, *_):
         input_img, target_img, *_ = batch
         output_img = self(input_img)
-        assert output_img.shape == target_img.shape
         loss = self.loss(output_img, target_img)
         self.log("train/loss", loss)
         return loss
@@ -92,7 +91,6 @@ class EncoderDecoder(pl.LightningModule):
     def validation_step(self, batch, *_):
         input_img, target_img, *_ = batch
         output_img = self(input_img)
-        assert output_img.shape == target_img.shape
         loss = self.loss(output_img, target_img)
         self.log("val/loss", loss, prog_bar=True)
         # self.log("val/ospa", self.ospa(batch), prog_bar=True)
@@ -101,7 +99,6 @@ class EncoderDecoder(pl.LightningModule):
     def test_step(self, batch, *_):
         input_img, target_img, *_ = batch
         output_img = self(input_img)
-        assert output_img.shape == target_img.shape
         self.log("test/loss", self.loss(output_img, target_img))
         self.log("test/ospa", self.ospa(batch), prog_bar=True)
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
@@ -194,6 +191,7 @@ class Conv2dCoder(EncoderDecoder):
                 )
             )
             encoder_layers += [
+                (nn.BatchNorm2d(encoder_channels[i]) if batch_norm else nn.Identity()),
                 nn.Conv2d(
                     encoder_channels[i],
                     encoder_channels[i + 1],
@@ -201,11 +199,6 @@ class Conv2dCoder(EncoderDecoder):
                     stride,
                     padding,
                     _dilation,
-                ),
-                (
-                    nn.BatchNorm2d(encoder_channels[i + 1])
-                    if batch_norm
-                    else nn.Identity()
                 ),
                 _activation(),
             ]
@@ -225,11 +218,7 @@ class Conv2dCoder(EncoderDecoder):
             output_padding = desired_shape - actual_shape
 
             decoder_layers += [
-                (
-                    nn.BatchNorm2d(decoder_channels[i + 1])
-                    if batch_norm
-                    else nn.Identity()
-                ),
+                (nn.BatchNorm2d(decoder_channels[i]) if batch_norm else nn.Identity()),
                 nn.ConvTranspose2d(
                     decoder_channels[i],
                     decoder_channels[i + 1],
@@ -248,11 +237,7 @@ class Conv2dCoder(EncoderDecoder):
         hidden_layers = []
         for i in range(n_hidden + 1):
             hidden_layers += [
-                (
-                    nn.BatchNorm2d(hidden_channels[i + 1])
-                    if batch_norm
-                    else nn.Identity()
-                ),
+                (nn.BatchNorm2d(hidden_channels[i]) if batch_norm else nn.Identity()),
                 nn.Conv2d(hidden_channels[i], hidden_channels[i + 1], 1),
                 _activation(),
             ]

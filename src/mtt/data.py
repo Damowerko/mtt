@@ -1,12 +1,47 @@
 from collections import deque
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 from concurrent.futures import ProcessPoolExecutor
+from glob import glob
+import os
 
 import numpy as np
 import torch
-from torch.utils.data import IterableDataset
+from torch.utils.data import IterableDataset, Dataset
+from tqdm import tqdm
 
 from mtt.simulator import Simulator
+
+
+class OfflineDataset(Dataset):
+    def __init__(self, length=20, data_dir="./data/simulations/", **kwargs):
+        self.length = length
+        self.data_dir = data_dir
+        # each file contains a single simulation run
+        self.n_simulations = len(glob(os.path.join(data_dir, "*.pt")))
+        # load an experiment to get the shape of the data
+        self.simulation_len = len(self.load_simulation(0)[0]) - length + 1
+        print(
+            f"Loaded {self.n_simulations} simulations of length {self.simulation_len}."
+        )
+
+    def __len__(self) -> int:
+        return self.n_simulations * self.simulation_len
+
+    def __getitem__(self, idx: int):
+        simulation_idx = idx // self.simulation_len
+        simulation = self.load_simulation(simulation_idx)
+        start = idx % self.simulation_len
+        end = start + self.length
+        return (x[start:end] for x in simulation)
+
+    def load_simulation(self, idx) -> Tuple[torch.Tensor, torch.Tensor, List]:
+        # load simulation to cpu memory
+        return torch.load(os.path.join(self.data_dir, f"{idx}.pt"), map_location="cpu")
+
+    @staticmethod
+    def collate_fn(batch):
+        sensor_imgs, position_imgs, infos = zip(*batch)
+        return torch.stack(sensor_imgs), torch.stack(position_imgs), list(infos)
 
 
 class OnlineDataset(IterableDataset):
@@ -62,36 +97,35 @@ class OnlineDataset(IterableDataset):
                 ].astype(self.dtype)
             yield target_positions, sensor_positions, measurements, clutter, simulator
 
+    def vectors_to_images(
+        self, target_positions, sensor_positions, measurements, clutter, simulator
+    ):
+        sensor_img = simulator.measurement_image(
+            self.img_size,
+            measurements,
+            clutter,
+            device=self.device,
+        )
+        position_img = simulator.position_image(
+            self.img_size,
+            self.sigma_position,
+            target_positions,
+            device=self.device,
+        )
+        info = dict(
+            target_positions=target_positions,
+            sensor_positions=sensor_positions,
+            measurements=measurements,
+            clutter=clutter,
+            window=simulator.window,
+        )
+        return sensor_img, position_img, info
+
     def iter_images(self, simulator: Optional[Simulator] = None):
         simulator = self.init_simulator() if simulator is None else simulator
         with torch.no_grad():
-            for (
-                target_positions,
-                sensor_positions,
-                measurements,
-                clutter,
-                _,
-            ) in self.iter_simulation(simulator):
-                sensor_img = simulator.measurement_image(
-                    self.img_size,
-                    measurements,
-                    clutter,
-                    device=self.device,
-                )
-                position_img = simulator.position_image(
-                    self.img_size,
-                    self.sigma_position,
-                    target_positions,
-                    device=self.device,
-                )
-                info = dict(
-                    target_positions=target_positions,
-                    sensor_positions=sensor_positions,
-                    measurements=measurements,
-                    clutter=clutter,
-                    window=simulator.window,
-                )
-                yield sensor_img, position_img, info
+            for args in self.iter_simulation(simulator):
+                yield self.vectors_to_images(*args)
 
     def __iter__(self):
         simulator = self.init_simulator()
@@ -129,11 +163,12 @@ def generate_data(
 ):
     if pool:
         futures = []
-        with ProcessPoolExecutor() as e:
+        with ProcessPoolExecutor() as e, tqdm(total=n_simulations) as pbar:
             for _ in range(n_simulations):
                 f = e.submit(_generate_data, online_dataset, images=images)
+                f.add_done_callback(lambda _: pbar.update())
                 futures.append(f)
-        return [f.result() for f in futures]
+            return [f.result() for f in futures]
     else:
         return [
             _generate_data(online_dataset, images=images) for _ in range(n_simulations)
