@@ -32,11 +32,12 @@ class Simulator:
         Args:
             window: The width and height of the simulation window.
             width: The width of the simulation area.
-            n_targets: The average number of targets per km^2.
-            n_sensors: The average number of sensors per km^22.
-            target_lifetime: The average lifetime of a target in seconds.
-            clutter_rate: The clutter probability (poisson).
-            p_detection: The detection probability.
+            p_birth: The probability of a target being born per km^2.
+            p_survival: The probability of a target surviving.
+            p_detection: The probability of a sensor detecting a target.
+            n_sensors: The number of sensors per km^2.
+            n_clutter: The number of clutter measurements per sensor.
+            model: The model used for the target motion.
             sigma_motion: The standard deviation of the target motion.
             sigma_initial_state: The standard deviation of the initial target state.
             sensor_range: The maximum range of the sensors.
@@ -52,6 +53,7 @@ class Simulator:
         self.p_birth = p_birth
         self.n_clutter = n_clutter
         self.p_detection = p_detection
+        self.n_sensors = n_sensors
         self.sigma_motion = sigma_motion
         self.sigma_initial_state = sigma_initial_state
         self.dt = dt

@@ -127,12 +127,12 @@ class OnlineDataset(IterableDataset):
             for args in self.iter_simulation(simulator):
                 yield self.vectors_to_images(*args)
 
-    def __iter__(self):
+    def stack_images(self, images):
         simulator = self.init_simulator()
         sensor_imgs = deque(maxlen=self.length)
         position_imgs = deque(maxlen=self.length)
         infos = deque(maxlen=self.length)
-        for (sensor_img, position_img, info) in self.iter_images(simulator):
+        for (sensor_img, position_img, info) in images:
             sensor_imgs.append(sensor_img)
             position_imgs.append(position_img)
             infos.append(info)
@@ -142,6 +142,9 @@ class OnlineDataset(IterableDataset):
                     torch.stack(tuple(position_imgs)),
                     list(infos),
                 )
+
+    def __iter__(self):
+        return self.stack_images(self.iter_images())
 
     @staticmethod
     def collate_fn(batch):
