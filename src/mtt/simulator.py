@@ -182,7 +182,8 @@ class Simulator:
         dx = X.reshape(-1, 1) - x.reshape(1, -1)
         dy = Y.reshape(-1, 1) - y.reshape(1, -1)
         Z = torch.exp(-(dx**2 + dy**2) * 0.5 / sigma**2).sum(dim=1)
-        Z /= (2.0 * torch.pi * sigma**2) ** 0.5
+        # scale so that each peak sums to 1
+        Z /= 2 * torch.pi * sigma**2 * 0.01612901 / (128 / size) ** 2
         return Z.reshape((size, size)).T  # transpose to match image coordinates
 
     def measurement_image(
