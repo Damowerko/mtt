@@ -1,14 +1,14 @@
 import argparse
 import os
-from typing import Union
+from typing import List, Union
 
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.loggers import TensorBoardLogger, Logger
 from torch.utils.data import DataLoader
 
-from mtt.data import OnlineDataset
+from mtt.data import OnlineDataset, OfflineDataset
 from mtt.models import Conv2dCoder, EncoderDecoder
 from mtt.simulator import Simulator
 
@@ -27,20 +27,29 @@ def init_simulator():
     return Simulator()
 
 
-def get_dataset(params: argparse.Namespace, n_steps=1000) -> OnlineDataset:
-    return OnlineDataset(
-        length=params.input_length,
-        init_simulator=init_simulator,
-        n_steps=n_steps,
-        **vars(params),
-    )
+def get_dataset(
+    params: argparse.Namespace, n_steps=1000, online=True
+) -> Union[OnlineDataset, OfflineDataset]:
+    if online:
+        return OnlineDataset(
+            length=params.input_length,
+            init_simulator=init_simulator,
+            n_steps=n_steps,
+            **vars(params),
+        )
+    else:
+        return OfflineDataset(
+            length=params.input_length,
+            **vars(params),
+        )
 
 
 def get_trainer(params: argparse.Namespace) -> pl.Trainer:
-    logger = (
-        TensorBoardLogger(save_dir="./", name="tensorboard", version="")
-        if not params.no_log
-        else None
+    run_id = os.environ.get("RUN_ID", None)
+    logger: List[Logger] | bool = (
+        False
+        if params.no_log
+        else [TensorBoardLogger(save_dir="./", name="tensorboard", version="")]
     )
     callbacks = [
         ModelCheckpoint(
@@ -78,20 +87,21 @@ def get_checkpoint_path() -> Union[str, None]:
 
 
 def train(params: argparse.Namespace):
-    train_dataset = get_dataset(params, n_steps=1000)
-    test_dataset = get_dataset(params, n_steps=100)
+    train_dataset = get_dataset(params, n_steps=100, online=False)
+    test_dataset = get_dataset(params, n_steps=100, online=True)
     train_loader = DataLoader(
         train_dataset,
         batch_size=params.batch_size,
-        num_workers=params.batch_size * 2,
+        num_workers=params.batch_size,
         persistent_workers=True,
         pin_memory=True,
         collate_fn=train_dataset.collate_fn,
+        shuffle=True,
     )
     test_loader = DataLoader(
         test_dataset,
         batch_size=params.batch_size,
-        num_workers=params.batch_size * 2,
+        num_workers=params.batch_size,
         persistent_workers=True,
         pin_memory=True,
         collate_fn=train_dataset.collate_fn,
