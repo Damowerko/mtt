@@ -18,7 +18,7 @@ class CAModel:
 
     def update(self, time_step=1.0):
         eta = rng.normal(0, self.sigma)
-        self.x = self.x + self.v * time_step + (self.a + eta) * time_step ** 2 / 2
+        self.x = self.x + self.v * time_step + (self.a + eta) * time_step**2 / 2
         self.v = self.v + (self.a + eta) * time_step
         self.a = self.a + eta
 
@@ -37,9 +37,9 @@ class CVModel:
         self.x, self.v = value
 
     def update(self, time_step=1.0):
-        eta = rng.normal(0, self.sigma)
-        self.x = self.x + self.v * time_step + eta * time_step ** 2 / 2
-        self.v = self.v + eta * time_step
+        a = rng.normal(0, self.sigma)
+        self.x = self.x + self.v * time_step + a * time_step**2 / 2
+        self.v = self.v + a * time_step
 
 
 class Target:
