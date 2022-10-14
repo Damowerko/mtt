@@ -73,7 +73,10 @@ class EncoderDecoder(pl.LightningModule):
         raise NotImplementedError
 
     def loss(self, output_img, target_img):
-        target_img = target_img[:, -self.output_shape[0] - 1 :]
+        if output_img.shape != target_img.shape:
+            raise ValueError(
+                f"Output shape {output_img.shape} != target shape {target_img.shape}."
+            )
         if self.loss_fn == "l2":
             return F.mse_loss(output_img, target_img)
         elif self.loss_fn == "l1":
@@ -81,7 +84,13 @@ class EncoderDecoder(pl.LightningModule):
         else:
             raise ValueError(f"Unknown loss {self.loss_fn}")
 
+    def truncate_batch(self, batch):
+        input_img, target_img, info = batch
+        target_img = target_img[:, -self.output_shape[0] :]
+        return input_img, target_img, info
+
     def training_step(self, batch, *_):
+        batch = self.truncate_batch(batch)
         input_img, target_img, *_ = batch
         output_img = self(input_img)
         loss = self.loss(output_img, target_img)
@@ -89,6 +98,7 @@ class EncoderDecoder(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, *_):
+        batch = self.truncate_batch(batch)
         input_img, target_img, *_ = batch
         output_img = self(input_img)
         loss = self.loss(output_img, target_img)
@@ -97,6 +107,7 @@ class EncoderDecoder(pl.LightningModule):
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
     def test_step(self, batch, *_):
+        batch = self.truncate_batch(batch)
         input_img, target_img, *_ = batch
         output_img = self(input_img)
         self.log("test/loss", self.loss(output_img, target_img))
