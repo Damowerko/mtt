@@ -128,7 +128,6 @@ class OnlineDataset(IterableDataset):
                 yield self.vectors_to_images(*args)
 
     def stack_images(self, images):
-        simulator = self.init_simulator()
         sensor_imgs = deque(maxlen=self.length)
         position_imgs = deque(maxlen=self.length)
         infos = deque(maxlen=self.length)
