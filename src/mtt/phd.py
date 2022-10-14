@@ -27,9 +27,9 @@ def phd_filter(
     ]
 ):
     # parameters
-    state_threshold = 0.25
-    merge_threshold = 2
-    prune_threshold = 0.1
+    state_threshold = 0.5
+    merge_threshold = 10
+    prune_threshold = 1e-3
 
     simulator: Simulator = data[0][4]
     assert simulator.model == "CV"
@@ -159,4 +159,4 @@ def phd_filter(
             # Here we check to see if the state has a sufficiently high weight to consider being added.
             if reduced_state.weight > state_threshold:
                 tracks_by_time[n].append(reduced_state)
-        yield tracks_by_time[n]
+    return tracks_by_time
