@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
 from sklearn.cluster import KMeans
 
-from mtt.utils import gaussian
+from mtt.utils import gaussian, make_grid
 
 
 rng = np.random.default_rng()
@@ -46,12 +46,7 @@ def sample_image(img: np.ndarray, width: float) -> np.ndarray:
     """
     Sample `img` based on pixel values.
     """
-    X, Y = np.meshgrid(
-        np.linspace(-width / 2, width / 2, img.shape[1]),
-        np.linspace(-width / 2, width / 2, img.shape[0]),
-    )
-    XY = np.stack([X, Y], axis=-1)
-
+    XY = make_grid(img.shape, width)
     # add epsilon to avoid division by zero
     img += 1e-8
     idx = rng.choice(img.size, size=1000, p=img.reshape(-1) / img.sum(), shuffle=False)
@@ -91,15 +86,7 @@ def main():
     width = 1000
     img_size = 256
     positions = rng.uniform(low=-width / 2, high=width / 2, size=(n, 2))
-
-    XY = np.stack(
-        np.meshgrid(
-            np.linspace(-width / 2, width / 2, img_size),
-            np.linspace(-width / 2, width / 2, img_size),
-        ),
-        axis=-1,
-    )
-
+    XY = make_grid(img_size, width)
     img = np.zeros((img_size, img_size))
     for p in positions:
         cov = [
