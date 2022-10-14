@@ -62,6 +62,23 @@ def gaussian(XY, mu, cov):
     return gaussian / norm
 
 
+def make_grid(img_size, width):
+    """
+    Make a grid of points.
+    Args:
+        img_size: (2,) the size of the image.
+        width: the width of the grid.
+    Returns:
+        XY: (img_size, img_size, 2) the grid of points.
+    """
+    X, Y = np.meshgrid(
+        np.linspace(-width / 2, width / 2, img_size),
+        np.linspace(-width / 2, width / 2, img_size),
+    )
+    XY = np.stack([X, Y], axis=-1)
+    return XY
+
+
 def ospa(X: np.ndarray, Y: np.ndarray, cutoff: float, p: int = 2) -> float:
     """
     Compute the OSPA metric.
