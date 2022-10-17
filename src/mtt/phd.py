@@ -14,8 +14,11 @@ from stonesoup.models.transition.linear import (
 from stonesoup.predictor.kalman import KalmanPredictor
 from stonesoup.updater.kalman import ExtendedKalmanUpdater
 from stonesoup.updater.pointprocess import PHDUpdater
-from stonesoup.types.state import TaggedWeightedGaussianState, State, StateVector
-from stonesoup.types.track import Track
+from stonesoup.types.state import (
+    TaggedWeightedGaussianState,
+    State,
+    StateVector,
+)
 from stonesoup.types.detection import Detection, Clutter
 
 from mtt.simulator import Simulator
@@ -96,7 +99,7 @@ def phd_filter(
     )
 
     all_gaussians = []
-    tracks_by_time: List[List[State]] = []
+    tracks_by_time: List[List[TaggedWeightedGaussianState]] = []
     for n, d in enumerate(data):
         _, sensor_positions, measurements, clutter, _ = d
         tracks_by_time.append([])
@@ -160,3 +163,16 @@ def phd_filter(
             if reduced_state.weight > state_threshold:
                 tracks_by_time[n].append(reduced_state)
     return tracks_by_time
+
+
+def positions_from_phd(
+    predictions: List[TaggedWeightedGaussianState], n_detections: float
+) -> np.ndarray:
+    # sort mixture by weight
+    predictions.sort(key=lambda x: x.weight, reverse=True)
+    cardinality = int(
+        np.round(np.sum([p.weight.real for p in predictions]) / n_detections)
+    )
+    # get the most likely states
+    mu = np.array([p.state_vector[:2, 0] for p in predictions[:cardinality]])
+    return mu
