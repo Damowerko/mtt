@@ -1,3 +1,4 @@
+from typing import Tuple, Union
 import numpy as np
 from numpy.typing import NDArray
 from scipy.optimize import linear_sum_assignment
@@ -57,12 +58,14 @@ def gaussian(XY, mu, cov):
     cov = np.asarray(cov, np.float64)
     det = np.linalg.det(cov)
     inv = np.linalg.inv(cov)
-    gaussian = np.exp(-0.5 * np.sum((XY - mu) @ inv * (XY - mu), axis=-1))
-    norm = np.sqrt((2 * np.pi) ** 2 * det)
+    gaussian = np.exp(
+        -0.5 * ((XY - mu)[..., None, :] @ inv[None, None, ...] @ (XY - mu)[..., None])
+    ).squeeze()
+    norm = np.sqrt((2 * np.pi) ** 2 * det) * 0.01612901 / (128 / XY.shape[0]) ** 2
     return gaussian / norm
 
 
-def make_grid(img_size, width):
+def make_grid(img_size: Union[int, Tuple[int, int]], width):
     """
     Make a grid of points.
     Args:
@@ -71,9 +74,11 @@ def make_grid(img_size, width):
     Returns:
         XY: (img_size, img_size, 2) the grid of points.
     """
+    if isinstance(img_size, int):
+        img_size = (img_size, img_size)
     X, Y = np.meshgrid(
-        np.linspace(-width / 2, width / 2, img_size),
-        np.linspace(-width / 2, width / 2, img_size),
+        np.linspace(-width / 2, width / 2, img_size[0]),
+        np.linspace(-width / 2, width / 2, img_size[1]),
     )
     XY = np.stack([X, Y], axis=-1)
     return XY

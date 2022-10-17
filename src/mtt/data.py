@@ -121,12 +121,6 @@ class OnlineDataset(IterableDataset):
         )
         return sensor_img, position_img, info
 
-    def iter_images(self, simulator: Optional[Simulator] = None):
-        simulator = self.init_simulator() if simulator is None else simulator
-        with torch.no_grad():
-            for args in self.iter_simulation(simulator):
-                yield self.vectors_to_images(*args)
-
     def stack_images(self, images):
         sensor_imgs = deque(maxlen=self.length)
         position_imgs = deque(maxlen=self.length)
@@ -141,6 +135,12 @@ class OnlineDataset(IterableDataset):
                     torch.stack(tuple(position_imgs)),
                     list(infos),
                 )
+
+    def iter_images(self, simulator: Optional[Simulator] = None):
+        simulator = self.init_simulator() if simulator is None else simulator
+        with torch.no_grad():
+            for args in self.iter_simulation(simulator):
+                yield self.vectors_to_images(*args)
 
     def __iter__(self):
         return self.stack_images(self.iter_images())
