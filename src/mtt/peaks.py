@@ -1,8 +1,9 @@
-from typing import Tuple
+from typing import Tuple, NamedTuple
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
 from sklearn.cluster import KMeans
+import torch
 
 from mtt.utils import gaussian, make_grid
 
@@ -10,9 +11,20 @@ from mtt.utils import gaussian, make_grid
 rng = np.random.default_rng()
 
 
-def find_peaks(
-    image: np.ndarray, width: float, n_peaks=None
-) -> Tuple[np.ndarray, np.ndarray]:
+class GMM(NamedTuple):
+    means: np.ndarray
+    covariances: np.ndarray
+    weights: np.ndarray
+
+
+class GaussianMixtureImage:
+    def __init__(self, n_components, device=None) -> None:
+        self.n_components = n_components
+        self.mu = torch.zeros(n_components, 2, device=device)
+        self.cov = torch.zeros(n_components, 2, 2, device=device)
+
+
+def find_peaks(image: np.ndarray, width: float, n_peaks=None) -> GMM:
     """
     Find peaks in the `image` by fitting a GMM.
     To fit the mixture we randomly sample points in the image weighted by the intensity.
@@ -37,9 +49,7 @@ def find_peaks(
     samples = sample_image(image, width)
 
     # Fit gaussian mixture model to find peaks.
-    means, covariances = fit_gmm(samples, n_components=n_components)
-
-    return means, covariances
+    return fit_gmm(samples, n_components=n_components)
 
 
 def sample_image(img: np.ndarray, width: float) -> np.ndarray:
@@ -53,14 +63,17 @@ def sample_image(img: np.ndarray, width: float) -> np.ndarray:
     return XY.reshape(-1, 2)[idx]
 
 
-def fit_gmm(samples: np.ndarray, n_components: int):
+def fit_gmm(samples: np.ndarray, n_components: int) -> GMM:
     """
     1. Sample `img` based on pixel values.
     2. Fit gaussian mixture model to find peaks.
+
+    Returns:
+        A GMM object with the means, covariances and weights of the fitted gaussian mixture model.
     """
     # if n_components is zero, return empty arrays
     if n_components == 0:
-        return np.empty((0, 2)), np.empty((0, 2, 2))
+        return GMM(np.empty((0, 2)), np.empty((0, 2, 2)), np.empty(0))
     if n_components < 0:
         raise ValueError(f"n_components must be non-negative, got {n_components}.")
 
@@ -75,10 +88,9 @@ def fit_gmm(samples: np.ndarray, n_components: int):
         n_init=10,
     )
     gmm.fit(samples)
-    means = gmm.means_
-    covariances = gmm.covariances_
+    # get only the large weights
     idx = gmm.weights_ > 0.5 / n_components
-    return means[idx], covariances[idx]
+    return GMM(gmm.means_[idx], gmm.covariances_[idx], gmm.weights_[idx])
 
 
 def main():
@@ -98,7 +110,7 @@ def main():
 
     samples = sample_image(img, width)
     n_components = int(np.round(img.sum()))
-    means, covariances = fit_gmm(samples, n_components)
+    means, covariances, _ = fit_gmm(samples, n_components)
 
     # make a plot of the model
     img_hat = np.zeros((img_size, img_size))
