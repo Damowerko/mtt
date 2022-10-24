@@ -121,19 +121,28 @@ class OnlineDataset(IterableDataset):
         )
         return sensor_img, position_img, info
 
-    def stack_images(self, images):
-        sensor_imgs = deque(maxlen=self.length)
-        position_imgs = deque(maxlen=self.length)
-        infos = deque(maxlen=self.length)
-        for (sensor_img, position_img, info) in images:
-            sensor_imgs.append(sensor_img)
-            position_imgs.append(position_img)
-            infos.append(info)
-            if len(sensor_imgs) == self.length:
+    def stack_images(self, images, queue=True):
+        if queue:
+            sensor_imgs = deque(maxlen=self.length)
+            position_imgs = deque(maxlen=self.length)
+            infos = deque(maxlen=self.length)
+            for (sensor_img, position_img, info) in images:
+                sensor_imgs.append(sensor_img)
+                position_imgs.append(position_img)
+                infos.append(info)
+                if len(sensor_imgs) == self.length:
+                    yield (
+                        torch.stack(tuple(sensor_imgs)),
+                        torch.stack(tuple(position_imgs)),
+                        list(infos),
+                    )
+        else:
+            sensor_imgs, position_imgs, infos = OnlineDataset.collate_fn(list(images))
+            for i in range(len(sensor_imgs) - self.length + 1):
                 yield (
-                    torch.stack(tuple(sensor_imgs)),
-                    torch.stack(tuple(position_imgs)),
-                    list(infos),
+                    sensor_imgs[i : i + self.length],
+                    position_imgs[i : i + self.length],
+                    infos[i : i + self.length],
                 )
 
     def iter_images(self, simulator: Optional[Simulator] = None):

@@ -1,14 +1,17 @@
-from typing import Callable
+from typing import Callable, Type
+import os
+import subprocess
+
+import matplotlib.pyplot as plt
+import numpy as np
 import pytorch_lightning as pl
-from pytorch_lightning.utilities.argparse import get_init_arguments_and_types
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-import matplotlib.pyplot as plt
+from pytorch_lightning.utilities.argparse import get_init_arguments_and_types
 
-from mtt.utils import ospa
 from mtt.peaks import find_peaks
+from mtt.utils import ospa
 
 rng = np.random.default_rng()
 
@@ -261,3 +264,12 @@ class Conv2dCoder(EncoderDecoder):
         # x = x.view((-1, self.hparams.n_channels) + self.embedding_shape)
         x = self.decoder(x)
         return x
+
+
+def load_model(model_cls: Type[EncoderDecoder], run_id: str) -> EncoderDecoder:
+    run_path = subprocess.run(
+        ["guild", "ls", run_id], stdout=subprocess.PIPE
+    ).stdout.decode("utf-8")
+    run_path = run_path.splitlines()[0][:-1]
+    checkpoint_path = os.path.join(run_path, "checkpoints/best.ckpt")
+    return model_cls.load_from_checkpoint(checkpoint_path).cuda()
