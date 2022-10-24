@@ -1,5 +1,6 @@
 from typing import List, Tuple
 from datetime import datetime
+from copy import copy
 
 import numpy as np
 from stonesoup.hypothesiser.distance import DistanceHypothesiser
@@ -168,11 +169,20 @@ def phd_filter(
 def positions_from_phd(
     predictions: List[TaggedWeightedGaussianState], n_detections: float
 ) -> np.ndarray:
+    """Extract the positions from the PHD predictions.
+    Args:
+        predictions: The predictions from the PHD filter.
+        n_detections: The expected number of detections.
+    """
+    # don't mutate the original list
+    predictions = copy(predictions)
     # sort mixture by weight
     predictions.sort(key=lambda x: x.weight, reverse=True)
+    # since there are multiple detections per sensor
+    # the PHD intensity L1 norm should be will n_detection times the cardinality
     cardinality = int(
         np.round(np.sum([p.weight.real for p in predictions]) / n_detections)
     )
     # get the most likely states
     mu = np.array([p.state_vector[:2, 0] for p in predictions[:cardinality]])
-    return mu
+    return mu.reshape(-1, 2)

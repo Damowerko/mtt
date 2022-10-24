@@ -17,9 +17,10 @@ from mtt.phd import phd_filter, positions_from_phd
 
 rng = np.random.default_rng()
 
-n_trials = 10
-scale = 3
-phd = scale == 1
+n_trials = 10  # number of simulations to run
+scale = 10  # the width of the area in km
+queue = False  # should a deque be used to stack images
+phd = scale == 1  # run the phd filter as well?
 
 data_dir = f"data/test/{scale}km"
 simulations_file = os.path.join(data_dir, "simulations.pkl")
@@ -77,39 +78,14 @@ if not os.path.exists(simulations_file):
             pkl.dump(predictions_phd, f)
 
 
-model = load_model(Conv2dCoder, "58c6fd8a")
-
-with open(os.path.join(data_dir, "simulations.pkl"), "rb") as f:
-    dataset_vectors = pkl.load(f)[:n_trials]
-
-
-def predict_cnn(vectors):
-    with torch.no_grad():
-        images = map(online_dataset.vectors_to_images, *zip(*vectors))
-        simulator = dataset_vectors[0][0][4]
-        window = simulator.window
-        filt_idx = -1
-        predictions_cnn = []
-        for sensor_imgs, _, _ in online_dataset.stack_images(images, queue=False):
-            pred_imgs = model(sensor_imgs.cuda()).cpu().numpy()
-            predictions_cnn += [find_peaks(pred_imgs[filt_idx], width=window)[0]]
-    return predictions_cnn
-
-
 def predict_phd(phds: List[List[TaggedWeightedGaussianState]]):
     return [positions_from_phd(phd, n_detections) for phd in phds]
 
 
-ospa_cnn = []
-for dataset_idx in tqdm(range(len(dataset_vectors)), desc="Running CNN"):
-    vectors = dataset_vectors[dataset_idx][online_dataset.length - 1 :]
-    predictions_cnn = predict_cnn(dataset_vectors[dataset_idx])
-    ospa_cnn.append([])
-    for idx in range(len(predictions_cnn)):
-        target_positions = vectors[idx][0]
-        ospa_cnn[-1] += [ospa(target_positions, predictions_cnn[idx], 500)]
-print("CNN Mean/Variance: ", np.mean(ospa_cnn), np.std(ospa_cnn))
+with open(os.path.join(data_dir, "simulations.pkl"), "rb") as f:
+    dataset_vectors = pkl.load(f)[:n_trials]
 
+# PHD filter testing
 if phd:
     with open(os.path.join(data_dir, "phd.pkl"), "rb") as f:
         dataset_phd = pkl.load(f)[:n_trials]
@@ -123,3 +99,30 @@ if phd:
             target_positions = vectors[idx][0]
             ospa_phd[-1] += [ospa(target_positions, predictions_phd[idx], 500)]
     print("PHD Mean/Variance: ", np.mean(ospa_phd), np.std(ospa_phd))
+
+# CNN model testing
+model = load_model(Conv2dCoder, "58c6fd8a")
+
+
+def predict_cnn(vectors):
+    with torch.no_grad():
+        images = map(online_dataset.vectors_to_images, *zip(*vectors))
+        simulator = dataset_vectors[0][0][4]
+        window = simulator.window
+        filt_idx = -1
+        predictions_cnn = []
+        for sensor_imgs, _, _ in online_dataset.stack_images(images, queue=queue):
+            pred_imgs = model(sensor_imgs.cuda()).cpu().numpy()
+            predictions_cnn += [find_peaks(pred_imgs[filt_idx], width=window)[0]]
+    return predictions_cnn
+
+
+ospa_cnn = []
+for dataset_idx in tqdm(range(len(dataset_vectors)), desc="Running CNN"):
+    vectors = dataset_vectors[dataset_idx][online_dataset.length - 1 :]
+    predictions_cnn = predict_cnn(dataset_vectors[dataset_idx])
+    ospa_cnn.append([])
+    for idx in range(len(predictions_cnn)):
+        target_positions = vectors[idx][0]
+        ospa_cnn[-1] += [ospa(target_positions, predictions_cnn[idx], 500)]
+print("CNN Mean/Variance: ", np.mean(ospa_cnn), np.std(ospa_cnn))
