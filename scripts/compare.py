@@ -63,8 +63,11 @@ if not os.path.exists(simulations_file):
         )
     with open(simulations_file, "wb") as f:
         pkl.dump(simulations, f)
-
-    if phd:
+else:
+    with open(simulations_file, "rb") as f:
+        dataset_vectors = pkl.load(f)[:n_trials]
+if phd and not os.path.exists(phd_file):
+    if not os.path.exists(phd_file):
         # run phd filter on each simulation
         with ProcessPoolExecutor() as executor:
             predictions_phd = list(
@@ -76,16 +79,16 @@ if not os.path.exists(simulations_file):
             )
         with open(phd_file, "wb") as f:
             pkl.dump(predictions_phd, f)
+    else:
+        with open(phd_file, "rb") as f:
+            predictions_phd = pkl.load(f)
 
 
+# PHD filter testing
 def predict_phd(phds: List[List[TaggedWeightedGaussianState]]):
     return [positions_from_phd(phd, n_detections) for phd in phds]
 
 
-with open(os.path.join(data_dir, "simulations.pkl"), "rb") as f:
-    dataset_vectors = pkl.load(f)[:n_trials]
-
-# PHD filter testing
 if phd:
     with open(os.path.join(data_dir, "phd.pkl"), "rb") as f:
         dataset_phd = pkl.load(f)[:n_trials]
