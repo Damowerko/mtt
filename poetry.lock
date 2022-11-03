@@ -1627,6 +1627,17 @@ optional = false
 python-versions = ">=3.5"
 
 [[package]]
+name = "SciencePlots"
+version = "1.0.9"
+description = "Format Matplotlib for scientific plotting"
+category = "main"
+optional = false
+python-versions = "*"
+
+[package.dependencies]
+matplotlib = "*"
+
+[[package]]
 name = "scikit-learn"
 version = "1.1.2"
 description = "A set of python modules for machine learning and data mining"
@@ -2194,7 +2205,7 @@ testing = ["func-timeout", "jaraco.itertools", "pytest (>=6)", "pytest-black (>=
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.9,<3.11"
-content-hash = "b267c5dc60d9a04bca096bdb4207157bbf0247717533d0abb2806d8b6beb2f6e"
+content-hash = "55a30f24b291d13370a0eb7996b6ac8f9a128c080131bf4ca586aef8ca351adf"
 
 [metadata.files]
 absl-py = [
@@ -3787,6 +3798,9 @@ Rtree = [
     {file = "ruamel.yaml.clib-0.2.6-cp39-cp39-win32.whl", hash = "sha256:3fb9575a5acd13031c57a62cc7823e5d2ff8bc3835ba4d94b921b4e6ee664104"},
     {file = "ruamel.yaml.clib-0.2.6-cp39-cp39-win_amd64.whl", hash = "sha256:825d5fccef6da42f3c8eccd4281af399f21c02b32d98e113dbc631ea6a6ecbc7"},
     {file = "ruamel.yaml.clib-0.2.6.tar.gz", hash = "sha256:4ff604ce439abb20794f05613c374759ce10e3595d1867764dd1ae675b85acbd"},
+]
+SciencePlots = [
+    {file = "SciencePlots-1.0.9.tar.gz", hash = "sha256:2b002f263734a718acdf1e5be57f0de5ee887e70517dfbe1118a27d0ee3dfb0f"},
 ]
 scikit-learn = [
     {file = "scikit-learn-1.1.2.tar.gz", hash = "sha256:7c22d1305b16f08d57751a4ea36071e2215efb4c09cb79183faa4e8e82a3dbf8"},

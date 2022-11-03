@@ -20,6 +20,7 @@ imageio-ffmpeg = "^0.4.7"
 seaborn = "^0.12.0"
 wandb = "^0.13.4"
 stonesoup = "^0.1b11"
+SciencePlots = "^1.0.9"
 
 
 [tool.poetry.group.dev.dependencies]
