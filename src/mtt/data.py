@@ -1,6 +1,6 @@
 from collections import deque
 from typing import Callable, List, Optional, Tuple
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from glob import glob
 import os
 
@@ -163,24 +163,25 @@ class OnlineDataset(IterableDataset):
         )
 
 
-def _generate_data(online_dataset: OnlineDataset, images=False):
-    if images:
-        return online_dataset.collate_fn(list(online_dataset.iter_images()))
+def _generate_data(online_dataset: OnlineDataset):
     return list(online_dataset.iter_simulation())
 
 
-def generate_data(
-    online_dataset: OnlineDataset, n_simulations=10, images=False, pool=True
-):
-    if pool:
-        futures = []
-        with ProcessPoolExecutor() as e, tqdm(total=n_simulations) as pbar:
-            for _ in range(n_simulations):
-                f = e.submit(_generate_data, online_dataset, images=images)
-                f.add_done_callback(lambda _: pbar.update())
-                futures.append(f)
-            return [f.result() for f in futures]
-    else:
-        return [
-            _generate_data(online_dataset, images=images) for _ in range(n_simulations)
+def generate_data(online_dataset: OnlineDataset, n_simulations=10):
+    futures = []
+    with ProcessPoolExecutor() as e:
+        for _ in range(n_simulations):
+            futures += [e.submit(_generate_data, online_dataset)]
+
+    # iterate over the futures as they complete
+    images = []
+    for f in tqdm(
+        as_completed(futures), desc="Generating simulations", total=len(futures)
+    ):
+        vectors = f.result()
+        images += [
+            online_dataset.collate_fn(
+                [online_dataset.vectors_to_images(*v) for v in vectors]
+            )
         ]
+    return images
