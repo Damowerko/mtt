@@ -1,6 +1,8 @@
+from typing import List
+
 import numpy as np
-from numpy.typing import ArrayLike, NDArray
 import torch
+from numpy.typing import ArrayLike, NDArray
 
 from mtt.utils import to_cartesian, to_polar, to_polar_torch
 
@@ -110,3 +112,29 @@ class Sensor:
             / rtheta[:, 0]
         )
         return Z.reshape(out_shape)
+
+
+def measurement_image(
+    size: int,
+    window: float,
+    sensors: List[Sensor],
+    measurements: List[torch.Tensor],
+    device=None,
+) -> torch.Tensor:
+    """
+    Image of the density function.
+
+    Args:
+        size int: the width and height of the image.
+        window float: the size of the window.
+        sensors List[Sensor]: the sensors.
+        measurements List[torch.Tensor]: a list of measurements for each sensor.
+        device torch.device | str | None: the device to use.
+    """
+    x = torch.linspace(-window / 2, window / 2, size, device=device)
+    y = torch.linspace(-window / 2, window / 2, size, device=device)
+    XY = torch.stack(torch.meshgrid(x, y, indexing="ij"), dim=2)
+    Z = torch.zeros((size, size), device=device)
+    for s, m in zip(sensors, measurements):
+        Z += s.measurement_density_torch(XY, m, device=device)
+    return Z.T  # transpose to match image coordinates

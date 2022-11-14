@@ -15,8 +15,16 @@ def main(args):
         raise ValueError(f"Output directory {args.out_dir} is not empty.")
 
     online_dataset = OnlineDataset(n_steps=119, length=20, img_size=128, device="cuda")
-    for i in tqdm.trange(args.n_files, desc="Generating files"):
-        data = generate_data(online_dataset, args.simulations_per_file)
+    for i in tqdm.trange(
+        args.n_files, desc="Generating dataset", unit="files", position=0
+    ):
+        data = generate_data(
+            online_dataset,
+            args.simulations_per_file,
+            tqdm_kwargs=dict(
+                desc=f"Generating file", unit="sims", position=1, leave=False
+            ),
+        )
         with open(os.path.join(args.out_dir, f"{i}.pt"), "wb") as f:
             torch.save(data, f)
 

@@ -1,12 +1,12 @@
+import os
 from collections import deque
-from typing import Callable, List, Optional, Tuple
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from glob import glob
-import os
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-from torch.utils.data import IterableDataset, Dataset
+from torch.utils.data import Dataset, IterableDataset
 from tqdm import tqdm
 
 from mtt.simulator import Simulator
@@ -167,7 +167,11 @@ def _generate_data(online_dataset: OnlineDataset):
     return list(online_dataset.iter_simulation())
 
 
-def generate_data(online_dataset: OnlineDataset, n_simulations=10):
+def generate_data(
+    online_dataset: OnlineDataset, n_simulations=10, tqdm_kwargs: Optional[Dict] = None
+):
+    tqdm_kwargs = dict(desc="Generating data") if tqdm_kwargs is None else tqdm_kwargs
+
     futures = []
     with ProcessPoolExecutor() as e:
         for _ in range(n_simulations):
@@ -175,9 +179,7 @@ def generate_data(online_dataset: OnlineDataset, n_simulations=10):
 
     # iterate over the futures as they complete
     images = []
-    for f in tqdm(
-        as_completed(futures), desc="Generating simulations", total=len(futures)
-    ):
+    for f in tqdm(as_completed(futures), total=len(futures), **tqdm_kwargs):
         vectors = f.result()
         images += [
             online_dataset.collate_fn(
