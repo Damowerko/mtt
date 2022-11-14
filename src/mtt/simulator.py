@@ -10,6 +10,32 @@ from mtt.utils import to_cartesian
 rng = np.random.default_rng()
 
 
+def measurement_image(
+    size: int,
+    window: float,
+    sensors: List[Sensor],
+    measurements: List[torch.Tensor],
+    device=None,
+):
+    """
+    Image of the density function.
+
+    Args:
+        size int: the width and height of the image.
+        window float: the size of the window.
+        sensors List[Sensor]: the sensors.
+        measurements List[torch.Tensor]: a list of measurements for each sensor.
+        device torch.device | str | None: the device to use.
+    """
+    x = torch.linspace(-window / 2, window / 2, size, device=device)
+    y = torch.linspace(-window / 2, window / 2, size, device=device)
+    XY = torch.stack(torch.meshgrid(x, y, indexing="ij"), dim=2)
+    Z = torch.zeros((size, size), device=device)
+    for s, m in zip(sensors, measurements):
+        Z += s.measurement_density_torch(XY, m, device=device)
+    return Z.T  # transpose to match image coordinates
+
+
 class Simulator:
     def __init__(
         self,
@@ -211,13 +237,9 @@ class Simulator:
         if clutter is None:
             clutter = [np.zeros((0, 2)) for _ in range(len(self.sensors))]
         _clutter = [torch.from_numpy(c).to(device=device) for c in clutter]
-
-        x = torch.linspace(-self.window / 2, self.window / 2, size, device=device)
-        y = torch.linspace(-self.window / 2, self.window / 2, size, device=device)
-        XY = torch.stack(torch.meshgrid(x, y, indexing="ij"), dim=2)
-        Z = torch.zeros((size, size), device=device)
-        for s, m, c in zip(self.sensors, _target_measurements, _clutter):
-            Z += s.measurement_density_torch(
-                XY, torch.concat((m, c), dim=0), device=device
-            )
-        return Z.T  # transpose to match image coordinates
+        measurements = [
+            torch.concat((m, c), dim=0) for m, c in zip(_target_measurements, _clutter)
+        ]
+        return measurement_image(
+            size, self.window, self.sensors, measurements, device=device
+        )
