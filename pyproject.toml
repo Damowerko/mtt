@@ -8,19 +8,17 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.9,<3.11"
 numpy = "^1.22.1"
-matplotlib = "^3.5.1"
-PySide6 = "^6.2.2.1"
+pandas = "<1.2"
+matplotlib = "^3.6.2"
+seaborn = "^0.12.1"
+imageio = "^2.22.4"
 torch = {url = "https://download.pytorch.org/whl/cu116/torch-1.12.1%2Bcu116-cp39-cp39-linux_x86_64.whl"}
 pytorch-lightning = "^1.7.5"
-pandas = "<1.2"
 scikit-learn = "^1.1.2"
-imageio = "^2.21.3"
 av = "^9.2.0"
 imageio-ffmpeg = "^0.4.7"
-seaborn = "^0.12.0"
 wandb = "^0.13.4"
 stonesoup = "^0.1b11"
-SciencePlots = "^1.0.9"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -28,6 +26,7 @@ black = "^22.8.0"
 jupyter = "^1.0.0"
 ipympl = "^0.8.7"
 guildai = "^0.8.1"
+pytest = "^7.2.0"
 
 [build-system]
 requires = ["poetry-core"]
