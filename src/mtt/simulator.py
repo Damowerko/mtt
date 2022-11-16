@@ -1,6 +1,7 @@
 from typing import List, Optional, Sequence, Union
 
 import numpy as np
+import numpy.typing as npt
 import torch
 
 from mtt.sensor import Sensor, measurement_image
@@ -138,13 +139,13 @@ class Simulator:
         n_birth = rng.poisson(self.p_birth * self.area)
         self.targets += [self.init_target() for _ in range(n_birth)]
 
-    def measurements(self) -> List[np.ndarray]:
+    def measurements(self) -> List[npt.NDArray[np.floating]]:
         measurements = []
         for sensor in self.sensors:
             measurements.append(sensor.measure(self.positions))
         return measurements
 
-    def clutter(self):
+    def clutter(self) -> List[npt.NDArray[np.floating]]:
         clutter = []
         for sensor in self.sensors:
             # clutter rate is per one sensor
@@ -163,7 +164,11 @@ class Simulator:
         return clutter
 
     def position_image(
-        self, size: int, sigma: float, target_positions: np.ndarray, device=None
+        self,
+        size: int,
+        sigma: float,
+        target_positions: npt.NDArray[np.floating],
+        device=None,
     ):
         """
         Create an image of the targets at the given positions.

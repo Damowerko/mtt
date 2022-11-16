@@ -47,7 +47,7 @@ class OfflineDataset(Dataset):
 class OnlineDataset(IterableDataset):
     def __init__(
         self,
-        n_steps: int = 1000,
+        n_steps: int = 100,
         length: int = 20,
         img_size: int = 128,
         sigma_position: float = 10.0,

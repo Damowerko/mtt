@@ -6,7 +6,7 @@ from numpy.typing import NDArray
 from mtt.models import EncoderDecoder
 from mtt.peaks import find_peaks
 from mtt.sensor import Sensor, measurement_image
-from mtt.types import CNNFilter, EstimateType
+from mtt.types import CNNFilter
 
 
 class CNNEsimate:
@@ -21,12 +21,21 @@ class EncoderDecoderFilter(CNNFilter[CNNEsimate]):
     def __init__(
         self, model: EncoderDecoder, window: float, sensor_kwargs=dict()
     ) -> None:
+        """
+        Args:
+            model (EncoderDecoder): EncoderDecoder model to use for filtering.
+            window (float): Size of the window in meters that we are filtering on.
+            sensor_kwargs (dict, optional): Keyword arguments to pass to the :py:class:`Sensor` class.
+        """
         super().__init__()
         self.model = model
         self.sensor_kwargs = sensor_kwargs
         self.window = window
         # initialize a queue of input images
-        self.queue = deque(torch.zeros(model.input_shape), maxlen=model.input_shape[0])
+        self.queue = deque(
+            torch.zeros(model.input_shape, device=model.device, dtype=model.dtype),  # type: ignore
+            maxlen=model.input_shape[0],
+        )
 
     def step(
         self,
