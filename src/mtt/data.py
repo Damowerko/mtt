@@ -167,23 +167,20 @@ def _generate_data(online_dataset: OnlineDataset):
     return list(online_dataset.iter_simulation())
 
 
-def generate_data(
-    online_dataset: OnlineDataset, n_simulations=10, tqdm_kwargs: Optional[Dict] = None
-):
-    tqdm_kwargs = dict(desc="Generating data") if tqdm_kwargs is None else tqdm_kwargs
-
+def generate_data(online_dataset: OnlineDataset, n_simulations=10):
+    """
+    A data generator that can be used to generate data in parallel.
+    """
     futures = []
+    # we generate the simulations on cpu in parallel
     with ProcessPoolExecutor() as e:
         for _ in range(n_simulations):
             futures += [e.submit(_generate_data, online_dataset)]
 
+    # the images are generated on the gpu in sequence
     # iterate over the futures as they complete
-    images = []
-    for f in tqdm(as_completed(futures), total=len(futures), **tqdm_kwargs):
+    for f in as_completed(futures):
         vectors = f.result()
-        images += [
-            online_dataset.collate_fn(
-                [online_dataset.vectors_to_images(*v) for v in vectors]
-            )
-        ]
-    return images
+        yield online_dataset.collate_fn(
+            [online_dataset.vectors_to_images(*v) for v in vectors]
+        )
