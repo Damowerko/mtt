@@ -106,7 +106,6 @@ class EncoderDecoder(pl.LightningModule):
         output_img = self(input_img)
         loss = self.loss(output_img, target_img)
         self.log("val/loss", loss, prog_bar=True)
-        # self.log("val/ospa", self.ospa(batch), prog_bar=True)
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
     def test_step(self, batch, *_):

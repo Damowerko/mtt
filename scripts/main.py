@@ -8,40 +8,13 @@ from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger, Logger
 from torch.utils.data import DataLoader
 
-from mtt.data import OnlineDataset, OfflineDataset
-from mtt.models import Conv2dCoder, EncoderDecoder
+from mtt.data import OnlineDataset, build_offline_datapipes, collate_fn
+from mtt.models import Conv2dCoder
 from mtt.simulator import Simulator
-
-
-def get_model_cls(model_type: str) -> EncoderDecoder:
-    models = {
-        "Conv2dCoder": Conv2dCoder,
-    }
-    if model_type not in models:
-        raise ValueError(f"Unknown model type: {model_type}")
-    assert issubclass(models[model_type], EncoderDecoder)
-    return models[model_type]
 
 
 def init_simulator():
     return Simulator()
-
-
-def get_dataset(
-    params: argparse.Namespace, n_steps=1000, online=True
-) -> Union[OnlineDataset, OfflineDataset]:
-    if online:
-        return OnlineDataset(
-            length=params.input_length,
-            init_simulator=init_simulator,
-            n_steps=n_steps,
-            **vars(params),
-        )
-    else:
-        return OfflineDataset(
-            length=params.input_length,
-            **vars(params),
-        )
 
 
 def get_trainer(params: argparse.Namespace) -> pl.Trainer:
@@ -81,43 +54,49 @@ def get_trainer(params: argparse.Namespace) -> pl.Trainer:
     )
 
 
+def get_online_dataset(params: argparse.Namespace, n_steps=100):
+    return OnlineDataset(
+        length=params.input_length,
+        init_simulator=init_simulator,
+        n_steps=n_steps,
+        **vars(params),
+    )
+
+
 def get_checkpoint_path() -> Union[str, None]:
     ckpt_path = "./checkpoints/best.ckpt"
     return ckpt_path if os.path.exists(ckpt_path) else None
 
 
 def train(params: argparse.Namespace):
-    train_dataset = get_dataset(params, n_steps=100, online=False)
-    test_dataset = get_dataset(params, n_steps=100, online=True)
+    train_dp, val_dp = build_offline_datapipes()
     train_loader = DataLoader(
-        train_dataset,
+        dataset=train_dp,
         batch_size=params.batch_size,
-        num_workers=params.batch_size,
-        persistent_workers=True,
+        num_workers=min(torch.multiprocessing.cpu_count(), 32),
         pin_memory=True,
-        collate_fn=train_dataset.collate_fn,
-        shuffle=True,
+        collate_fn=collate_fn,
     )
-    test_loader = DataLoader(
-        test_dataset,
+    val_loader = DataLoader(
+        dataset=val_dp,
         batch_size=params.batch_size,
-        num_workers=params.batch_size,
-        persistent_workers=True,
+        num_workers=min(torch.multiprocessing.cpu_count(), 32),
         pin_memory=True,
-        collate_fn=train_dataset.collate_fn,
+        collate_fn=collate_fn,
     )
     trainer = get_trainer(params)
     model = Conv2dCoder(**vars(params))
-    trainer.fit(model, train_loader, test_loader, ckpt_path=get_checkpoint_path())
-    trainer.test(model, test_loader, ckpt_path=get_checkpoint_path())
+    trainer.fit(model, train_loader, val_loader, ckpt_path=get_checkpoint_path())
+    test(params)
 
 
 def test(params: argparse.Namespace):
-    dataset = get_dataset(params)
     test_loader = DataLoader(
-        dataset,
-        batch_size=1,
-        collate_fn=dataset.collate_fn,
+        get_online_dataset(params),
+        batch_size=params.batch_size,
+        num_workers=min(torch.multiprocessing.cpu_count(), 32),
+        pin_memory=True,
+        collate_fn=collate_fn,
     )
     trainer = get_trainer(params)
     model = Conv2dCoder(**vars(params))

@@ -2,14 +2,63 @@ import os
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from glob import glob
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import Callable, List, Optional, Tuple, Dict
+from functools import partial
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset, IterableDataset
-from tqdm import tqdm
+import torchdata.datapipes as dp
+from torch.utils.data import Dataset, IterableDataset, IterDataPipe
 
 from mtt.simulator import Simulator
+
+SimulationImages = Tuple[torch.Tensor, torch.Tensor, List[Dict]]
+
+
+def load_simulation_file(path: str) -> SimulationImages:
+    return torch.load(path, map_location="cpu")
+
+
+def simulation_window(data: SimulationImages, length=20) -> List[SimulationImages]:
+    """
+    Split the simulation data into several overlapping windows of length `length`.
+
+    Args:
+        data: the simulation data
+        length: the length of the sequences
+    """
+    sensor_imgs, position_imgs, infos = data
+    n_samples = len(sensor_imgs) - length + 1
+    samples: List[SimulationImages] = [
+        (
+            sensor_imgs[i : i + length],
+            position_imgs[i : i + length],
+            infos[i : i + length],
+        )
+        for i in range(n_samples)
+    ]
+    return samples
+
+
+def collate_fn(batch):
+    sensor_imgs, position_imgs, infos = zip(*batch)
+    return torch.stack(sensor_imgs), torch.stack(position_imgs), list(infos)
+
+
+def build_offline_datapipes(root_dir="./data/train", length=20, batch_size=32):
+    datapipes: Tuple[IterDataPipe[SimulationImages], IterDataPipe[SimulationImages]] = (
+        dp.iter.FileLister(root_dir, "*.pt")
+        .random_split(weights={"train": 0.95, "val": 0.05})
+        .shuffle()  # we want each shard to have random simulations
+        .sharding_filter()  # shard based on each file
+        # load the simulation data using the above functions
+        .map(load_simulation_file)
+        .map(partial(simulation_window, length=length))
+        # each batch is a collection of random windows from random simulations
+        .unbatch()
+        .shuffle()
+    )
+    return datapipes
 
 
 class OfflineDataset(Dataset):
@@ -40,8 +89,7 @@ class OfflineDataset(Dataset):
 
     @staticmethod
     def collate_fn(batch):
-        sensor_imgs, position_imgs, infos = zip(*batch)
-        return torch.stack(sensor_imgs), torch.stack(position_imgs), list(infos)
+        return collate_fn(batch)
 
 
 class OnlineDataset(IterableDataset):
@@ -156,11 +204,7 @@ class OnlineDataset(IterableDataset):
 
     @staticmethod
     def collate_fn(batch):
-        return (
-            torch.stack(tuple(sensor_imgs for sensor_imgs, _, _ in batch)),
-            torch.stack(tuple(positions_imgs for _, positions_imgs, _ in batch)),
-            list(infos for _, _, infos in batch),
-        )
+        return collate_fn(batch)
 
 
 def _generate_data(online_dataset: OnlineDataset):
