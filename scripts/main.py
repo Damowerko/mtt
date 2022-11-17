@@ -19,7 +19,7 @@ def init_simulator():
 
 def get_trainer(params: argparse.Namespace) -> pl.Trainer:
     run_id = os.environ.get("RUN_ID", None)
-    logger: List[Logger] | bool = (
+    logger: Union[List[Logger], bool] = (
         False
         if params.no_log
         else [TensorBoardLogger(save_dir="./", name="tensorboard", version="")]
