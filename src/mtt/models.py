@@ -40,7 +40,7 @@ class EncoderDecoder(pl.LightningModule):
         for base in cls.__bases__:
             if hasattr(base, "add_model_specific_args"):
                 group = base.add_model_specific_args(group)  # type: ignore
-        args = get_init_arguments_and_types(cls)
+        args = get_init_arguments_and_types(cls)  # type: ignore
         for name, types, default in args:
             if types[0] not in (int, float, str, bool):
                 continue
@@ -143,7 +143,7 @@ class EncoderDecoder(pl.LightningModule):
         ospa_value = 0
         for i in range(output_img.shape[0]):
             img = output_img[i, -1].cpu().numpy()
-            X, _ = find_peaks(img, info[i][-1]["window"])
+            X = find_peaks(img, info[i][-1]["window"]).means
             Y = info[i][-1]["target_positions"]
             ospa_value += ospa(X, Y, self.ospa_cutoff, p=2)
         return ospa_value / output_img.shape[0]
