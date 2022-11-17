@@ -1,6 +1,6 @@
 logs/
 data/
-data # if symlinked
+data
 **/__pycache__/
 .python-version
 figures/
