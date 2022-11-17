@@ -45,20 +45,26 @@ def collate_fn(batch):
     return torch.stack(sensor_imgs), torch.stack(position_imgs), list(infos)
 
 
-def build_offline_datapipes(root_dir="./data/train", length=20, batch_size=32):
-    datapipes: Tuple[IterDataPipe[SimulationImages], IterDataPipe[SimulationImages]] = (
-        dp.iter.FileLister(root_dir, "*.pt")
-        .random_split(weights={"train": 0.95, "val": 0.05})
-        .shuffle()  # we want each shard to have random simulations
-        .sharding_filter()  # shard based on each file
-        # load the simulation data using the above functions
-        .map(load_simulation_file)
-        .map(partial(simulation_window, length=length))
-        # each batch is a collection of random windows from random simulations
-        .unbatch()
-        .shuffle()
+def build_offline_datapipes(
+    root_dir="./data/train", length=20
+) -> Tuple[IterDataPipe[SimulationImages], IterDataPipe[SimulationImages]]:
+    n_files = len(glob(os.path.join(root_dir, "*.pt")))
+    datapipes = dp.iter.FileLister(root_dir, "*.pt").random_split(
+        weights={"train": 0.95, "val": 0.05}, seed=42, total_length=n_files
     )
-    return datapipes
+    return tuple(
+        (
+            datapipe.shuffle()
+            .sharding_filter()  # we want each shard to have random simulations  # shard based on each file
+            # load the simulation data using the above functions
+            .map(load_simulation_file)
+            .map(partial(simulation_window, length=length))
+            # each batch is a collection of random windows from random simulations
+            .unbatch()
+            .shuffle()
+        )
+        for datapipe in datapipes
+    )
 
 
 class OfflineDataset(Dataset):

@@ -69,7 +69,7 @@ def get_checkpoint_path() -> Union[str, None]:
 
 
 def train(params: argparse.Namespace):
-    train_dp, val_dp = build_offline_datapipes()
+    train_dp, val_dp = build_offline_datapipes("/nfs/general/mtt_data")
     train_loader = DataLoader(
         dataset=train_dp,
         batch_size=params.batch_size,
