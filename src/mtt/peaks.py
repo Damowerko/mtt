@@ -41,7 +41,7 @@ def find_peaks(image: np.ndarray, width: float, n_peaks=None) -> GMM:
 
     if n_peaks is None:
         # assuming number of peaks is approximately the sum of all pixels
-        n_components = int(np.round(image.sum()) * 2.3)
+        n_components = int(np.round(image.sum()))
     else:
         n_components = n_peaks
 
