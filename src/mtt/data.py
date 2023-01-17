@@ -1,11 +1,12 @@
 import os
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from glob import glob
-from typing import Callable, List, Optional, Tuple, Dict
 from functools import partial
+from glob import glob
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
 
 import numpy as np
+import numpy.typing as npt
 import torch
 import torchdata.datapipes as dp
 from torch.utils.data import Dataset, IterableDataset, IterDataPipe
@@ -98,6 +99,14 @@ class OfflineDataset(Dataset):
         return collate_fn(batch)
 
 
+class VectorData(NamedTuple):
+    target_positions: npt.NDArray[np.floating]
+    sensor_positions: npt.NDArray[np.floating]
+    measurements: List[npt.NDArray[np.floating]]
+    clutter: List[npt.NDArray[np.floating]]
+    simulator: Simulator
+
+
 class OnlineDataset(IterableDataset):
     def __init__(
         self,
@@ -149,7 +158,9 @@ class OnlineDataset(IterableDataset):
                 clutter[i] = clutter[i][
                     (np.abs(clutter[i]) <= simulator.window / 2).all(axis=1)
                 ].astype(self.dtype)
-            yield target_positions, sensor_positions, measurements, clutter, simulator
+            yield VectorData(
+                target_positions, sensor_positions, measurements, clutter, simulator
+            )
 
     def vectors_to_images(
         self, target_positions, sensor_positions, measurements, clutter, simulator

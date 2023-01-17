@@ -18,7 +18,7 @@ from mtt.phd import phd_filter, positions_from_phd
 rng = np.random.default_rng()
 
 n_trials = 10  # number of simulations to run
-scale = 10  # the width of the area in km
+scale = 1  # the width of the area in km
 queue = False  # should a deque be used to stack images
 phd = scale == 1  # run the phd filter as well?
 

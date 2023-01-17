@@ -1,9 +1,10 @@
 from typing import Tuple, Union
+
 import numpy as np
+import torch
 from numpy.typing import NDArray
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial.distance import cdist
-import torch
 
 
 def to_cartesian(val) -> NDArray[np.float64]:
@@ -22,6 +23,8 @@ def to_cartesian(val) -> NDArray[np.float64]:
 def to_polar(val) -> NDArray[np.float64]:
     """
     Convert cartesion coordinates to polar coordinates.
+    Args:
+        val: (..., 2) the x and y coordinates.
     """
     val = np.asarray(val, np.float64)
     shape = val.shape
