@@ -24,7 +24,7 @@ class GaussianMixtureImage:
         self.cov = torch.zeros(n_components, 2, 2, device=device)
 
 
-def find_peaks(image: np.ndarray, width: float, n_peaks=None) -> GMM:
+def find_peaks(image: np.ndarray, width: float, n_peaks=None, n_peaks_scale=1.0) -> GMM:
     """
     Find peaks in the `image` by fitting a GMM.
     To fit the mixture we randomly sample points in the image weighted by the intensity.
@@ -41,7 +41,7 @@ def find_peaks(image: np.ndarray, width: float, n_peaks=None) -> GMM:
 
     if n_peaks is None:
         # assuming number of peaks is approximately the sum of all pixels
-        n_components = int(np.round(image.sum()))
+        n_components = int(np.round(image.sum() * n_peaks_scale))
     else:
         n_components = n_peaks
 

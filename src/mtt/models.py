@@ -1,6 +1,6 @@
-from typing import Callable, Type
 import os
 import subprocess
+from typing import Callable, Type
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from pytorch_lightning.utilities.argparse import get_init_arguments_and_types
 
 from mtt.peaks import find_peaks
-from mtt.utils import ospa
+from mtt.utils import compute_ospa
 
 rng = np.random.default_rng()
 
@@ -145,7 +145,7 @@ class EncoderDecoder(pl.LightningModule):
             img = output_img[i, -1].cpu().numpy()
             X = find_peaks(img, info[i][-1]["window"]).means
             Y = info[i][-1]["target_positions"]
-            ospa_value += ospa(X, Y, self.ospa_cutoff, p=2)
+            ospa_value += compute_ospa(X, Y, self.ospa_cutoff, p=2)
         return ospa_value / output_img.shape[0]
 
     def configure_optimizers(self):

@@ -52,10 +52,19 @@ class SMCPHD:
         )
         self.states, self.weights = self.resample(predicted_states, updated_weights)
 
-    def extract_states(self, cardinality_search_range: int = 3):
+    def extract_states(
+        self, cardinality_search_range: int = 3
+    ) -> npt.NDArray[np.floating]:
+        """
+        Extract the estimated states from the particles.
+        Args:
+            cardinality_search_range: Will run k-means a number of times and return the best to extract the states from the particle distribution.
+        Returns:
+            estimated_states: (n,d) array of n estimated states each with dimension d.
+        """
         estimated_states: List[npt.NDArray] = []
         if self.weights.sum() < 0.5:
-            return estimated_states
+            return np.zeros((0, self.states.shape[1]))
 
         best_n_clusters = 0
         best_inertia = np.inf
@@ -89,7 +98,11 @@ class SMCPHD:
         for cluster_index in range(best_n_clusters):
             if np.sum(self.weights[labels == cluster_index]) > 0.5:
                 estimated_states += [kmeans.cluster_centers_[cluster_index]]
-        return estimated_states
+        return (
+            np.stack(estimated_states)
+            if len(estimated_states) > 0
+            else np.zeros((0, self.states.shape[1]))
+        )
 
     def prediction_step(
         self, states: npt.NDArray[np.float64], weights: npt.NDArray[np.float64]

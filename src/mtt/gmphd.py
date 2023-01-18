@@ -1,8 +1,9 @@
-from typing import List, Tuple
-from datetime import datetime
 from copy import copy
+from datetime import datetime
+from typing import List, Tuple
 
 import numpy as np
+import numpy.typing as npt
 from stonesoup.hypothesiser.distance import DistanceHypothesiser
 from stonesoup.hypothesiser.gaussianmixture import GaussianMixtureHypothesiser
 from stonesoup.measures import Mahalanobis
@@ -13,29 +14,22 @@ from stonesoup.models.transition.linear import (
     ConstantVelocity,
 )
 from stonesoup.predictor.kalman import KalmanPredictor
+from stonesoup.types.detection import Clutter, Detection
+from stonesoup.types.state import State, StateVector, TaggedWeightedGaussianState
 from stonesoup.updater.kalman import ExtendedKalmanUpdater
 from stonesoup.updater.pointprocess import PHDUpdater
-from stonesoup.types.state import (
-    TaggedWeightedGaussianState,
-    State,
-    StateVector,
-)
-from stonesoup.types.detection import Detection, Clutter
 
+from mtt.data import VectorData
 from mtt.simulator import Simulator
 
 
-def phd_filter(
-    data: List[
-        Tuple[np.ndarray, np.ndarray, List[np.ndarray], List[np.ndarray], Simulator]
-    ]
-):
+def gmphd_filter(data: List[VectorData]):
     # parameters
     state_threshold = 0.5
     merge_threshold = 10
     prune_threshold = 1e-3
 
-    simulator: Simulator = data[0][4]
+    simulator: Simulator = data[0].simulator
     assert simulator.model == "CV"
 
     transition_model = CombinedLinearGaussianTransitionModel(
@@ -166,9 +160,9 @@ def phd_filter(
     return tracks_by_time
 
 
-def positions_from_phd(
+def positions_from_gmphd(
     predictions: List[TaggedWeightedGaussianState], n_detections: float
-) -> np.ndarray:
+) -> npt.NDArray[np.floating]:
     """Extract the positions from the PHD predictions.
     Args:
         predictions: The predictions from the PHD filter.

@@ -87,7 +87,7 @@ def make_grid(img_size: Union[int, Tuple[int, int]], width):
     return XY
 
 
-def ospa(X: np.ndarray, Y: np.ndarray, cutoff: float, p: int = 2) -> float:
+def compute_ospa(X: np.ndarray, Y: np.ndarray, cutoff: float, p: int = 2) -> float:
     """
     Compute the OSPA metric.
     Args:
@@ -111,7 +111,7 @@ def ospa(X: np.ndarray, Y: np.ndarray, cutoff: float, p: int = 2) -> float:
 
     # ospa is symmetric, so we assume m <= n.
     if m > n:
-        return ospa(Y, X, cutoff)
+        return compute_ospa(Y, X, cutoff)
     if n == 0:
         return 0
     if m == 0:
