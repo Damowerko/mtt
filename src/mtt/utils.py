@@ -87,7 +87,9 @@ def make_grid(img_size: Union[int, Tuple[int, int]], width):
     return XY
 
 
-def compute_ospa(X: np.ndarray, Y: np.ndarray, cutoff: float, p: int = 2) -> float:
+def compute_ospa_components(
+    X: np.ndarray, Y: np.ndarray, cutoff: float, p: int = 2
+) -> Tuple[float, float]:
     """
     Compute the OSPA metric.
     Args:
@@ -96,7 +98,8 @@ def compute_ospa(X: np.ndarray, Y: np.ndarray, cutoff: float, p: int = 2) -> flo
         cutoff: the cutoff for the OSPA metric.
         p: the p-norm to use.
     Returns:
-        ospa: the OSPA metric.
+        ospa_distance: the distance component of the OSPA metric.
+        ospa_cardinality: the cardinality component of the OSPA metric.
     """
     X = np.asarray(X, np.float64)
     Y = np.asarray(Y, np.float64)
@@ -111,15 +114,35 @@ def compute_ospa(X: np.ndarray, Y: np.ndarray, cutoff: float, p: int = 2) -> flo
 
     # ospa is symmetric, so we assume m <= n.
     if m > n:
-        return compute_ospa(Y, X, cutoff)
+        return compute_ospa_components(Y, X, cutoff)
     if n == 0:
-        return 0
+        return 0, 0
     if m == 0:
-        return cutoff
+        return 0, cutoff
 
     dist = cdist(X, Y, metric="minkowski", p=p) ** p
     xidx, yidx = linear_sum_assignment(dist)
-    cost: float = np.minimum(dist[xidx, yidx], cutoff**p).sum()
+    ospa_distance: float = np.minimum(dist[xidx, yidx], cutoff**p).sum() / n
     # since m <= n, for any unassigned y we have a cost of cutoff
-    cost += cutoff**p * (n - m)
-    return (cost / n) ** (1 / p)
+    ospa_cardinality = cutoff**p * (n - m) / n
+
+    # take the p-root since we took the power earlier
+    ospa_distance = ospa_distance ** (1 / p)
+    ospa_cardinality = ospa_cardinality ** (1 / p)
+    return ospa_distance, ospa_cardinality
+
+
+def compute_ospa(X: np.ndarray, Y: np.ndarray, cutoff: float, p: int = 2) -> float:
+    """
+    Compute the OSPA metric.
+    Args:
+        X: (m, 2) set of positions.
+        Y: (n, 2) set of positions.
+        cutoff: the cutoff for the OSPA metric.
+        p: the p-norm to use.
+    Returns:
+        ospa: the OSPA metric.
+    """
+    ospa_distance, ospa_cardinality = compute_ospa_components(X, Y, cutoff, p)
+    # since this is a take p-root of the sum of powers to p
+    return (ospa_distance**p + ospa_cardinality**p) ** (1 / p)

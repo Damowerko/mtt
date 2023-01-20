@@ -1,11 +1,16 @@
 import os
 import pickle as pkl
 from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 from typing import Dict, List
 
+import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
+import pandas as pd
+import seaborn as sns
 import torch
+from scipy.stats import ttest_rel
 from tqdm import tqdm, trange
 
 from mtt.data import OnlineDataset, VectorData
@@ -14,7 +19,7 @@ from mtt.models import Conv2dCoder, load_model
 from mtt.peaks import find_peaks
 from mtt.simulator import Simulator
 from mtt.smc_phd import SMCPHD
-from mtt.utils import compute_ospa
+from mtt.utils import compute_ospa_components
 
 rng = np.random.default_rng()
 
@@ -22,13 +27,12 @@ n_trials = 100  # number of simulations to run
 scale = 1  # the width of the area in km
 n_peaks_scale = 2.3  # older models' output should be scaled by 2.3
 queue = False  # should a deque be used to stack images
-gmphd = scale == 1  # run the gmphd filter as well?
-smcphd = scale == 1  # run the smcphd filter as well?
+
+# which if any phd filters should be run
+phd_enable = scale == 1
 
 data_dir = f"data/test/{scale}km"
 simulations_file = os.path.join(data_dir, "simulations.pkl")
-gmphd_file = os.path.join(data_dir, "gmphd.pkl")
-smcphd_file = os.path.join(data_dir, "smcphd.pkl")
 
 
 def init_simulator():
@@ -50,15 +54,14 @@ expected_detections_per_target = (
 # the CNN output is undefined for the first online_dataset.length + 1 time steps
 prediction_length = online_dataset.n_steps - online_dataset.length + 1
 
-# run or load simulations
-if not os.path.exists(data_dir):
-    os.makedirs(data_dir)
-
 
 def run_simulation(*_):
     return list(online_dataset.iter_simulation())
 
 
+# SIMULATIONS
+if not os.path.exists(data_dir):
+    os.makedirs(data_dir)
 if not os.path.exists(simulations_file):
     with ProcessPoolExecutor() as executor:
         simulations = list(
@@ -77,9 +80,6 @@ else:
             for j in range(len(simulations[i])):
                 simulations[i][j] = VectorData(*simulations[i][j])
 
-# for each filter store predicted positions in a dictionary
-predicted_positions: Dict[str, List[List[npt.NDArray[np.float64]]]] = {}
-
 
 def run_gmphd(simulation: List[VectorData]):
     # PHD filter testing
@@ -91,27 +91,9 @@ def run_gmphd(simulation: List[VectorData]):
     ][-prediction_length:]
 
 
-if gmphd:
-    if not os.path.exists(gmphd_file):
-        # run phd filter on each simulation
-        with ProcessPoolExecutor() as executor:
-            predicted_positions["GM-PHD"] = list(
-                tqdm(
-                    executor.map(run_gmphd, simulations),
-                    total=len(simulations),
-                    desc="Running PHD filter",
-                )
-            )
-        with open(gmphd_file, "wb") as f:
-            pkl.dump(predicted_positions["GM-PHD"], f)
-    else:
-        with open(gmphd_file, "rb") as f:
-            predicted_positions["GM-PHD"] = pkl.load(f)[:n_trials]
-
-
-def run_smcphd(simulation: List[VectorData], *_, **__):
+def run_smcphd(simulation: List[VectorData], adaptive_birth: bool = False):
     simulator = simulation[0].simulator
-    smc_phd = SMCPHD(simulator)
+    smc_phd = SMCPHD(simulator, 100, adaptive_birth=adaptive_birth)
 
     positions: List[npt.NDArray[np.floating]] = []
     for d in simulation:
@@ -121,22 +103,33 @@ def run_smcphd(simulation: List[VectorData], *_, **__):
     return positions[-prediction_length:]
 
 
-if smcphd:
-    if not os.path.exists(smcphd_file):
-        # run phd filter on each simulation
-        with ProcessPoolExecutor() as executor:
-            predicted_positions["SMC-PHD"] = list(
-                tqdm(
-                    executor.map(run_smcphd, simulations),
-                    total=len(simulations),
-                    desc="Running SMC-PHD filter",
-                )
+run_filter_funcitons = {
+    "GM-PHD": run_gmphd,
+    "SMC-PHD": partial(run_smcphd, adaptive_birth=False),
+    "SMC-PHD (adaptive)": partial(run_smcphd, adaptive_birth=True),
+}
+# for each filter store predicted positions in a dictionary
+predicted_positions: Dict[str, List[List[npt.NDArray[np.float64]]]] = {}
+for name, run_phd in run_filter_funcitons.items():
+    if not phd_enable:
+        continue
+    filename = os.path.join(data_dir, f"{name}.pkl")
+    if os.path.exists(filename):
+        with open(filename, "rb") as f:
+            predicted_positions[name] = pkl.load(f)[:n_trials]
+        continue
+
+    # run phd filter on each simulation
+    with ProcessPoolExecutor() as executor:
+        predicted_positions[name] = list(
+            tqdm(
+                executor.map(run_filter_funcitons[name], simulations),
+                total=len(simulations),
+                desc=f"Running {name} filter",
             )
-        with open(smcphd_file, "wb") as f:
-            pkl.dump(predicted_positions["SMC-PHD"], f)
-    else:
-        with open(smcphd_file, "rb") as f:
-            predicted_positions["SMC-PHD"] = pkl.load(f)[:n_trials]
+        )
+    with open(filename, "wb") as f:
+        pkl.dump(predicted_positions[name], f)
 
 # Now run the CNN model.
 model = load_model(Conv2dCoder, "58c6fd8a")
@@ -159,14 +152,21 @@ def run_cnn(simulation: List[VectorData]):
     return predictions_cnn
 
 
-# run the CNN, since we use GPU we do not parallelize
-predicted_positions["CNN"] = list(
-    tqdm(
-        map(run_cnn, simulations),
-        total=len(simulations),
-        desc="Running CNN filter",
+cnn_filename = os.path.join(data_dir, "CNN.pkl")
+if os.path.exists(cnn_filename):
+    with open(cnn_filename, "rb") as f:
+        predicted_positions["CNN"] = pkl.load(f)[:n_trials]
+else:
+    # run the CNN, since we use GPU we do not parallelize
+    predicted_positions["CNN"] = list(
+        tqdm(
+            map(run_cnn, simulations),
+            total=len(simulations),
+            desc="Running CNN filter",
+        )
     )
-)
+    with open(cnn_filename, "wb") as f:
+        pkl.dump(predicted_positions["CNN"], f)
 
 # extract the true positions
 true_positions: List[List[npt.NDArray[np.floating]]] = []
@@ -175,14 +175,38 @@ for simulation in simulations:
         [data.target_positions for data in simulation[-prediction_length:]]
     ]
 
-ospa = {k: np.zeros((n_trials, prediction_length)) for k in predicted_positions}
+ospa_components = {
+    k: np.zeros((n_trials, prediction_length, 2)) for k in predicted_positions
+}
 # find the OSPA distance between the predicted positions and the target positions
 for simulation_idx in trange(n_trials, desc="Calculating OSPA.", unit="simulation"):
     for k in predicted_positions:
         for step_idx in range(prediction_length):
             x = predicted_positions[k][simulation_idx][step_idx]
             y = true_positions[simulation_idx][step_idx]
-            ospa[k][simulation_idx, step_idx] = compute_ospa(x, y, 500)
+            ospa_components[k][simulation_idx, step_idx] = compute_ospa_components(
+                x, y, 500, p=2
+            )
 
-for k in ospa:
-    print(f"{k} OSPA: {np.mean(ospa[k]):.4f} ± {np.std(ospa[k]):.4f}")
+ospa = {}
+for k in ospa_components:
+    ospa_distance, ospa_cardinality = ospa_components[k].mean(axis=(0, 1))
+    # we take the mean of the OSPA distance for each experiment
+    ospa[k] = ((ospa_components[k] ** 2).sum(axis=2) ** 0.5).mean(axis=1)
+
+    print(f"\n --- {k} filter results ---")
+    print(f"OSPA: {np.mean(ospa[k]):.4f} ± {np.std(ospa[k]):.4f}")
+    print(f"OSPA Distance: {ospa_distance:.4f}")
+    print(f"OSPA Cardinality: {ospa_cardinality:.4f}")
+
+# paired t-test for CNN mean being lower than the other filters
+print(f"\n --- Paired t-test for CNN mean being lower than the other filters ---")
+if "CNN" in ospa:
+    for k in ospa:
+        if k == "CNN":
+            continue
+        test_result = ttest_rel(ospa["CNN"], ospa[k], alternative="less")
+        print(f"pvalue for CNN < {k}: {test_result.pvalue}")  # type: ignore
+        ospa_mean = ospa[k].mean()
+        improvement = -100 * (test_result.confidence_interval(0.99).high) / ospa_mean
+        print(f"% Improvement with 99% confidence: {improvement:0.2f}")

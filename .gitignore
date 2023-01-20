@@ -5,5 +5,4 @@ data
 .python-version
 figures/
 .vscode/
-icassp/
 **/.ipynb_checkpoints/
