@@ -1,12 +1,15 @@
-from typing import Tuple, Mapping, Any, List
 from collections import deque
-import torch
+from typing import Any, List, Mapping, Tuple
+
 import numpy as np
+import torch
 from numpy.typing import NDArray
+
 from mtt.models import EncoderDecoder
 from mtt.peaks import find_peaks
 from mtt.sensor import Sensor, measurement_image
 from mtt.types import CNNFilter
+from mtt.utils import to_cartesian
 
 
 class CNNEsimate:
@@ -71,9 +74,16 @@ class EncoderDecoderFilter(CNNFilter[CNNEsimate]):
         sensors: List[Sensor] = []
         _measurements: List[torch.Tensor] = []
         for sensor_id, sensor_state in sensor_states.items():
+            assert len(sensor_state) == 2, "Expected sensor state to be 2D position."
+            # measurements are in (bearing,range)
+            # convert to (range,bearing) then to cartesian
+            measurement_range_bearing = measurements[sensor_id][:, :-1:]
+            measurement_cartesian = (
+                to_cartesian(measurement_range_bearing) + sensor_state
+            )
             sensors += [Sensor(position=sensor_state, **self.sensor_kwargs)]
             _measurements += [
-                torch.from_numpy(measurements[sensor_id])
+                torch.from_numpy(measurement_cartesian)
                 .to(self.model.dtype)
                 .to(self.model.device)
             ]
