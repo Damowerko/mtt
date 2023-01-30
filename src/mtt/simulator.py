@@ -14,7 +14,7 @@ rng = np.random.default_rng()
 class Simulator:
     def __init__(
         self,
-        window: float = 1000,
+        window_width: float = 1000,
         width: Union[float, None] = None,
         p_birth: float = 0.5,
         p_survival: float = 0.95,
@@ -46,9 +46,12 @@ class Simulator:
             noise_bearing: The standard deviation of the bearing measurement noise.
             dt: The time step.
         """
-        self.window = window
-        self.width = window + 2 * sensor_range if width is None else width
-        self.area = self.width**2 / 1000**2
+        self.window_width = window_width
+        self.window_area = window_width**2 / 1000**2
+        self.simulation_width = (
+            window_width + 2 * sensor_range if width is None else width
+        )
+        self.simulation_area = self.simulation_width**2 / 1000**2
 
         self.p_survival = p_survival
         self.p_birth = p_birth
@@ -66,20 +69,20 @@ class Simulator:
         # make sure there is at least one target? TODO: check this
         self.targets = [
             self.init_target()
-            for i in range(1 + rng.poisson(n_targets * self.area - 1))
+            for i in range(1 + rng.poisson(n_targets * self.simulation_area - 1))
         ]
         # make sure there is at least one sensor? TODO: check this
         self.sensors = [
             self.init_sensor(sensor_range, noise_range, noise_bearing)
-            for _ in range(1 + rng.poisson(n_sensors * self.area - 1))
+            for _ in range(1 + rng.poisson(n_sensors * self.simulation_area - 1))
         ]
 
     def init_target(self) -> Target:
         initial_state = np.concatenate(
             (
                 rng.uniform(
-                    low=-self.width / 2,
-                    high=self.width / 2,
+                    low=-self.simulation_width / 2,
+                    high=self.simulation_width / 2,
                     size=(2, 1),
                 ),
                 rng.normal(
@@ -96,8 +99,8 @@ class Simulator:
     ) -> Sensor:
         return Sensor(
             position=rng.uniform(
-                low=-self.width / 2,
-                high=self.width / 2,
+                low=-self.simulation_width / 2,
+                high=self.simulation_width / 2,
                 size=2,
             ),
             noise=(noise_range, noise_bearing),
@@ -136,7 +139,7 @@ class Simulator:
         ]
 
         # Target birth
-        n_birth = rng.poisson(self.p_birth * self.area)
+        n_birth = rng.poisson(self.p_birth * self.simulation_area)
         self.targets += [self.init_target() for _ in range(n_birth)]
 
     def measurements(self) -> List[npt.NDArray[np.floating]]:
@@ -182,8 +185,12 @@ class Simulator:
         x, y = torch.as_tensor(target_positions, device=device).T
         # only consider measurements in windows
         X, Y = torch.meshgrid(
-            torch.linspace(-self.window / 2, self.window / 2, size, device=device),
-            torch.linspace(-self.window / 2, self.window / 2, size, device=device),
+            torch.linspace(
+                -self.window_width / 2, self.window_width / 2, size, device=device
+            ),
+            torch.linspace(
+                -self.window_width / 2, self.window_width / 2, size, device=device
+            ),
             indexing="ij",
         )
         dx = X.reshape(-1, 1) - x.reshape(1, -1)
@@ -220,5 +227,5 @@ class Simulator:
             torch.concat((m, c), dim=0) for m, c in zip(_target_measurements, _clutter)
         ]
         return measurement_image(
-            size, self.window, self.sensors, measurements, device=device
+            size, self.window_width, self.sensors, measurements, device=device
         )

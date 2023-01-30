@@ -36,7 +36,7 @@ simulations_file = os.path.join(data_dir, "simulations.pkl")
 
 
 def init_simulator():
-    return Simulator(window=1000 * scale)
+    return Simulator(window_width=1000 * scale)
 
 
 online_dataset = OnlineDataset(
@@ -139,7 +139,7 @@ def run_cnn(simulation: List[VectorData]):
     predictions_cnn: List[npt.NDArray] = []
     with torch.no_grad():
         images = map(online_dataset.vectors_to_images, *zip(*simulation))
-        window = simulation[0].simulator.window
+        window = simulation[0].simulator.window_width
         filt_idx = -1
         for sensor_imgs, _, _ in online_dataset.stack_images(images, queue=queue):
             pred_imgs = model(sensor_imgs.cuda()).cpu().numpy()
@@ -175,8 +175,12 @@ for simulation in simulations:
         [data.target_positions for data in simulation[-prediction_length:]]
     ]
 
+
 ospa_components = {
     k: np.zeros((n_trials, prediction_length, 2)) for k in predicted_positions
+}
+cardinality_error = {
+    k: np.zeros((n_trials, prediction_length)) for k in predicted_positions
 }
 # find the OSPA distance between the predicted positions and the target positions
 for simulation_idx in trange(n_trials, desc="Calculating OSPA.", unit="simulation"):
@@ -187,6 +191,7 @@ for simulation_idx in trange(n_trials, desc="Calculating OSPA.", unit="simulatio
             ospa_components[k][simulation_idx, step_idx] = compute_ospa_components(
                 x, y, 500, p=2
             )
+            cardinality_error[k][simulation_idx, step_idx] = np.abs(len(x) - len(y))
 
 ospa = {}
 for k in ospa_components:
@@ -198,6 +203,7 @@ for k in ospa_components:
     print(f"OSPA: {np.mean(ospa[k]):.4f} ± {np.std(ospa[k]):.4f}")
     print(f"OSPA Distance: {ospa_distance:.4f}")
     print(f"OSPA Cardinality: {ospa_cardinality:.4f}")
+    print(f"Cardinality Error: {np.mean(cardinality_error[k]):.4f}")
 
 # paired t-test for CNN mean being lower than the other filters
 print(f"\n --- Paired t-test for CNN mean being lower than the other filters ---")

@@ -81,7 +81,7 @@ def gmphd_filter(data: List[VectorData]):
     # tracks are initially empty because we don't know positions
     reduced_states = set()
 
-    birth_covar_diag = [simulator.window**2] * 2
+    birth_covar_diag = [simulator.window_width**2] * 2
     for sigma in simulator.sigma_initial_state:
         birth_covar_diag += [sigma**2] * 2
     birth_covar = np.diag(birth_covar_diag)
