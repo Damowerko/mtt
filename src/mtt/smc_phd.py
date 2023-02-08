@@ -3,6 +3,7 @@ from typing import List
 import numpy as np
 import numpy.typing as npt
 from sklearn.cluster import KMeans
+from mtt.sensor import Sensor
 
 from mtt.simulator import Simulator
 from mtt.utils import to_cartesian, to_polar
@@ -45,9 +46,11 @@ class SMCPHD:
     def __init__(
         self,
         simulator: Simulator,
-        particles_per_measurement: int = 100,
+        particles_per_target: int = 100,
+        particles_per_measurement: int = 5,
     ):
         self.simulator = simulator
+        self.particles_per_target = particles_per_target
         self.particles_per_measurement = particles_per_measurement
 
         self.transition_matrix = cv_transition_matrix(simulator.dt)
@@ -61,10 +64,9 @@ class SMCPHD:
         predicted_states, predicted_weights = self.prediction_step(
             self.states, self.weights, measurements
         )
-        updated_weights = self.update_step(
+        self.states, self.weights = self.update_step(
             predicted_states, predicted_weights, measurements
         )
-        self.states, self.weights = self.resample(predicted_states, updated_weights)
 
     def extract_states(
         self, cardinality_search_range: int = 3
@@ -119,41 +121,36 @@ class SMCPHD:
             else np.zeros((0, self.states.shape[1]))
         )
 
-    def birth_adaptive(self, measurements: List[npt.NDArray[np.float64]]):
-        n_born_expected = 0
-        newborn_states_list: List[npt.NDArray[np.floating]] = []
-        # particle birth based on measurements
-        for sensor, sensor_measurements in zip(self.simulator.sensors, measurements):
-            assert sensor_measurements.shape[1] == 2
-            # add noise in polar coordinates
-            sensor_measurements = to_polar(sensor_measurements - sensor.position)
-            birth_positions = rng.normal(
-                loc=sensor_measurements[None, ...],
-                scale=sensor.noise[None, None, ...],
-                size=(self.particles_per_measurement,) + sensor_measurements.shape,
-            ).reshape(-1, 2)
-            birth_positions = to_cartesian(birth_positions) + sensor.position
+    def birth_adaptive(
+        self, sensor: Sensor, sensor_measurements: npt.NDArray[np.float64]
+    ):
+        assert sensor_measurements.shape[1] == 2
+        # add noise in polar coordinates
+        polar_measurements = to_polar(sensor_measurements - sensor.position)
+        birth_positions = rng.normal(
+            loc=polar_measurements[None, ...],
+            scale=sensor.noise[None, None, ...],
+            size=(self.particles_per_measurement,) + sensor_measurements.shape,
+        ).reshape(-1, 2)
+        birth_positions = to_cartesian(birth_positions) + sensor.position
 
-            n_born_per_meter = self.simulator.p_birth / 1000**2
-            n_born_expected += n_born_per_meter * sensor.measurement_density(
-                birth_positions, sensor_measurements, sum=True, jacobian=False
-            )
-
-            newborn_states_list += [
-                np.concatenate(
-                    [birth_positions]
-                    + [
-                        rng.normal(
-                            scale=sigma,
-                            size=(birth_positions.shape[0], 2),
-                        )
-                        for sigma in self.simulator.sigma_initial_state
-                    ],
-                    axis=1,
+        # assuming uniform birth density
+        n_born_per_meter = self.simulator.p_birth / 1000**2
+        n_born_expected = n_born_per_meter * sensor.measurement_density(
+            birth_positions, sensor_measurements, sum=True, jacobian=False
+        )
+        newborn_states = np.concatenate(
+            [birth_positions]
+            + [
+                rng.normal(
+                    scale=sigma,
+                    size=(birth_positions.shape[0], 2),
                 )
-            ]
-        # birth_states is a list of (N, n_state_dims)
-        newborn_states = np.concatenate(newborn_states_list, axis=0)
+                for sigma in self.simulator.sigma_initial_state
+            ],
+            axis=1,
+        )
+        # newborn_states is a list of (N, n_state_dims)
         newborn_weights = (n_born_expected / newborn_states.shape[0]) * np.ones(
             newborn_states.shape[0]
         )
@@ -171,73 +168,73 @@ class SMCPHD:
             @ self.noise_matrix.T
         )
         persistent_weights = weights * self.simulator.p_survival
-        newborn_states, newborn_weights = self.birth_adaptive(measurements)
-        return persistent_states, persistent_weights, newborn_states, newborn_weights
+        return persistent_states, persistent_weights
 
     def update_step(
         self,
         persistent_states: npt.NDArray[np.float64],
         persistent_weights: npt.NDArray[np.float64],
-        newborn_states: npt.NDArray[np.float64],
-        newborn_weights: npt.NDArray[np.float64],
         measurements: List[npt.NDArray[np.float64]],
     ):
-        newborn_denominator = np.zeros(newborn_states.shape[0])
-        for sensor, sensor_measurements in zip(self.simulator.sensors, measurements):
+        """
+        Births new particles, updates the weights of the existing particles and resamples.
+        This is done for each sensor using iterative corrections.
+        """
 
+        for sensor, sensor_measurements in zip(self.simulator.sensors, measurements):
+            newborn_states, newborn_weights = self.birth_adaptive(
+                sensor, sensor_measurements
+            )
             target_in_range: npt.NDArray[np.floating] = (
                 np.linalg.norm(persistent_states[..., :2] - sensor.position, axis=1)
                 < sensor.range_max
             )
             detection_probability = sensor.p_detection * target_in_range
-
-            measurement_in_range: npt.NDArray[np.floating] = (
-                np.linalg.norm(sensor_measurements - sensor.position, axis=1)
-                < sensor.range_max
-            )
-            clutter_intensity = (
-                measurement_in_range
-                * self.simulator.n_clutter
-                / (np.pi * sensor.range_max**2)
+            clutter_intensity = self.simulator.n_clutter / (
+                np.pi * sensor.range_max**2
             )
 
             # (N, M) where N is the number of particles and M is the number of measurements (for this sensor)
-            measurement_likelyhood = sensor.p_detection * sensor.measurement_density(
+            likelyhood = detection_probability[:, None] * sensor.measurement_density(
                 persistent_states[..., :2],
                 sensor_measurements,
                 sum=False,
                 jacobian=False,
             )
-            likelyhood = detection_probability * measurement_likelyhood
-
-            # (1, M)
+            # weight_likelyhood is (N, M)
+            weight_likelyhood = likelyhood * persistent_weights[:, None]
+            # L is (1, M)
             L = (
-                clutter_intensity[None, ...]
+                clutter_intensity
                 + newborn_weights.sum()
-                + persistent_weights[None, :] @ likelyhood
+                + weight_likelyhood.sum(axis=0)
             )
 
-            updated_newborn_weights += (newborn_weights[:, None] / L).sum(axis=1)
+            persistent_weights = (1 - detection_probability) * persistent_weights + (
+                weight_likelyhood / L
+            ).sum(axis=1)
+            newborn_weights = newborn_weights / L.sum()
 
-            # phi is NxM, C is M while clutter_intensity is a scaler
-            likelyhood += (phi / (clutter_intensity + C)[None, :]).sum(
-                axis=1
-            ) / detections_per_target
-
-            # denominator = clutter_intensity + newborn_weights.sum() + phi.sum()
-
-        n_sensors_in_range = np.zeros(persistent_states.shape[0])
-        for sensor in self.simulator.sensors:
-            n_sensors_in_range += (
-                np.linalg.norm(persistent_states[:, :2] - sensor.position[None, :])
-                <= sensor.range_max
+            # resample
+            n_particles_persistent = int(
+                np.round(self.particles_per_target * persistent_weights.sum())
             )
+            persistent_states, persistent_weights = self.resample(
+                persistent_states, persistent_weights, n_particles_persistent
+            )
+            n_particles_newborn = self.particles_per_measurement * len(
+                sensor_measurements
+            )
+            newborn_states, newborn_weights = self.resample(
+                newborn_states, newborn_weights, n_particles_newborn
+            )
+            persistent_states = np.concatenate([persistent_states, newborn_states])
+            persistent_weights = np.concatenate([persistent_weights, newborn_weights])
+        return persistent_states, persistent_weights
 
-        updated_weights = (p_not_detection + likelyhood) * predicted_weights
-        return updated_weights
-
-    def resample(self, states, weights):
-        n_particles = int(np.round(weights.sum() * self.particles_per_target))
+    def resample(self, states, weights, n_particles):
+        if n_particles == 0:
+            return np.zeros((0, states.shape[1])), np.zeros(0)
         idx = rng.choice(len(weights), size=n_particles, p=weights / weights.sum())
         resampled_states = states[idx]
         resampled_weights = weights.sum() * np.full(n_particles, 1 / n_particles)
