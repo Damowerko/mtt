@@ -2,6 +2,7 @@ from collections import deque
 from typing import Any, List, Mapping, Tuple
 
 import numpy as np
+import numpy.typing as npt
 import torch
 from numpy.typing import NDArray
 
@@ -10,6 +11,24 @@ from mtt.peaks import find_peaks
 from mtt.sensor import Sensor, measurement_image
 from mtt.types import CNNFilter
 from mtt.utils import to_cartesian
+
+
+def convert_measurements(measurements_lmco: npt.NDArray[np.floating]):
+    """
+    Convert measurements from LMCO convention to UPenn convention.
+
+    LMCO Convention: (bearing, range) Bearing is clockwise starting at the y-axis.
+    UPenn Convention: (range, bearing) Bearing is counter-clockwise starting at the x-axis.
+
+    Args:
+        measurements_lmco: (N, 2) array of measurements in LMCO convention.
+    Returns:
+        measurements_upenn: (N, 2) array of measurements in UPenn convention.
+    """
+    measurements_upenn = measurements_lmco.copy()
+    measurements_upenn[:, 0] = measurements_lmco[:, 1]
+    measurements_upenn[:, 1] = np.pi / 2 - measurements_lmco[:, 0]
+    return measurements_upenn
 
 
 class CNNEsimate:
@@ -75,13 +94,12 @@ class EncoderDecoderFilter(CNNFilter[CNNEsimate]):
         _measurements: List[torch.Tensor] = []
         for sensor_id, sensor_state in sensor_states.items():
             assert len(sensor_state) == 2, "Expected sensor state to be 2D position."
-            # measurements are in (bearing,range)
-            # convert to (range,bearing) then to cartesian
-            measurement_range_bearing = measurements[sensor_id][:, :-1:]
+            sensors += [Sensor(position=sensor_state, **self.sensor_kwargs)]
+            # convert from LMCO to UPenn convention
+            measurement_range_bearing = convert_measurements(measurements[sensor_id])
             measurement_cartesian = (
                 to_cartesian(measurement_range_bearing) + sensor_state
             )
-            sensors += [Sensor(position=sensor_state, **self.sensor_kwargs)]
             _measurements += [
                 torch.from_numpy(measurement_cartesian)
                 .to(self.model.dtype)
