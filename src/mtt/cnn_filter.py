@@ -133,6 +133,6 @@ class EncoderDecoderFilter(CNNFilter[CNNEsimate]):
                 self.model(input[None, ...])[-1, -1, ...].cpu().numpy()
             )
         # find peaks in the output by fitting gaussian mixture model
-        gmm = find_peaks(output, self.window)
+        gmm = find_peaks(output, self.window, center=(self.window / 2, self.window / 2))
         estimates = [CNNEsimate(mu, cov) for mu, cov in zip(gmm.means, gmm.covariances)]
         return self.time, estimates

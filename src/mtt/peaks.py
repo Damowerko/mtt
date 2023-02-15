@@ -1,12 +1,12 @@
-from typing import Tuple, NamedTuple
-import numpy as np
+from typing import NamedTuple, Tuple
+
 import matplotlib.pyplot as plt
-from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
-from sklearn.cluster import KMeans
+import numpy as np
 import torch
+from sklearn.cluster import KMeans
+from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
 
 from mtt.utils import gaussian, make_grid
-
 
 rng = np.random.default_rng()
 
@@ -24,7 +24,13 @@ class GaussianMixtureImage:
         self.cov = torch.zeros(n_components, 2, 2, device=device)
 
 
-def find_peaks(image: np.ndarray, width: float, n_peaks=None, n_peaks_scale=1.0) -> GMM:
+def find_peaks(
+    image: np.ndarray,
+    width: float,
+    n_peaks=None,
+    n_peaks_scale=1.0,
+    center=(0, 0),
+) -> GMM:
     """
     Find peaks in the `image` by fitting a GMM.
     To fit the mixture we randomly sample points in the image weighted by the intensity.
@@ -46,17 +52,17 @@ def find_peaks(image: np.ndarray, width: float, n_peaks=None, n_peaks_scale=1.0)
         n_components = n_peaks
 
     # Sample image based on pixel values.
-    samples = sample_image(image, width)
+    samples = sample_image(image, width, center=center)
 
     # Fit gaussian mixture model to find peaks.
     return fit_gmm(samples, n_components=n_components)
 
 
-def sample_image(img: np.ndarray, width: float) -> np.ndarray:
+def sample_image(img: np.ndarray, width: float, center=(0, 0)) -> np.ndarray:
     """
     Sample `img` based on pixel values.
     """
-    XY = make_grid(img.shape, width)
+    XY = make_grid(img.shape, width, center=center)
     # add epsilon to avoid division by zero
     img += 1e-8
     idx = rng.choice(img.size, size=1000, p=img.reshape(-1) / img.sum(), shuffle=False)

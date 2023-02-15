@@ -68,7 +68,7 @@ def gaussian(XY, mu, cov):
     return gaussian / norm
 
 
-def make_grid(img_size: Union[int, Tuple[int, int]], width):
+def make_grid(img_size: Union[int, Tuple[int, int]], width, center=(0, 0)):
     """
     Make a grid of points.
     Args:
@@ -80,8 +80,8 @@ def make_grid(img_size: Union[int, Tuple[int, int]], width):
     if isinstance(img_size, int):
         img_size = (img_size, img_size)
     X, Y = np.meshgrid(
-        np.linspace(-width / 2, width / 2, img_size[0]),
-        np.linspace(-width / 2, width / 2, img_size[1]),
+        np.linspace(-width / 2, width / 2, img_size[0]) + center[0],
+        np.linspace(-width / 2, width / 2, img_size[1]) + center[1],
     )
     XY = np.stack([X, Y], axis=-1)
     return XY
