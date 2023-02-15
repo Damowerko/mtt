@@ -13,22 +13,28 @@ from mtt.types import CNNFilter
 from mtt.utils import to_cartesian
 
 
-def convert_measurements(measurements_lmco: npt.NDArray[np.floating]):
+def convert_measurements(
+    measurements: npt.NDArray[np.floating], from_lmco: bool = True
+):
     """
-    Convert measurements from LMCO convention to UPenn convention.
+    Convert measurements from LMCO convention to UPenn convention and back.
 
     LMCO Convention: (bearing, range) Bearing is clockwise starting at the y-axis.
     UPenn Convention: (range, bearing) Bearing is counter-clockwise starting at the x-axis.
 
     Args:
-        measurements_lmco: (N, 2) array of measurements in LMCO convention.
+        measurements: (N, 2) array of measurements in LMCO/UPenn convention.
     Returns:
-        measurements_upenn: (N, 2) array of measurements in UPenn convention.
+        converted_measurements: (N, 2) array of measurements in UPenn/LMCO convention.
     """
-    measurements_upenn = measurements_lmco.copy()
-    measurements_upenn[:, 0] = measurements_lmco[:, 1]
-    measurements_upenn[:, 1] = np.pi / 2 - measurements_lmco[:, 0]
-    return measurements_upenn
+    converted_measurements = measurements.copy()
+    if from_lmco:
+        converted_measurements[:, 0] = measurements[:, 1]
+        converted_measurements[:, 1] = np.pi / 2 - measurements[:, 0]
+    else:
+        converted_measurements[:, 0] = np.pi / 2 - measurements[:, 1]
+        converted_measurements[:, 1] = measurements[:, 0]
+    return converted_measurements
 
 
 class CNNEsimate:
@@ -53,6 +59,7 @@ class EncoderDecoderFilter(CNNFilter[CNNEsimate]):
         self.model = model
         self.sensor_kwargs = sensor_kwargs
         self.window = window
+        self.window_center = (window / 2, window / 2)
         # initialize a queue of input images
         self.queue = deque(
             torch.zeros(model.input_shape, device=model.device, dtype=model.dtype),  # type: ignore
@@ -96,12 +103,16 @@ class EncoderDecoderFilter(CNNFilter[CNNEsimate]):
             assert len(sensor_state) == 2, "Expected sensor state to be 2D position."
             sensors += [Sensor(position=sensor_state, **self.sensor_kwargs)]
             # convert from LMCO to UPenn convention
-            measurement_range_bearing = convert_measurements(measurements[sensor_id])
-            measurement_cartesian = (
-                to_cartesian(measurement_range_bearing) + sensor_state
+            measurements_range_bearing = convert_measurements(
+                measurements[sensor_id], from_lmco=True
             )
+            measurements_cartesian = (
+                to_cartesian(measurements_range_bearing) + sensor_state
+            )
+            # center the window around 0
+            measurements_cartesian -= np.array(self.window_center)
             _measurements += [
-                torch.from_numpy(measurement_cartesian)
+                torch.from_numpy(measurements_cartesian)
                 .to(self.model.dtype)
                 .to(self.model.device)
             ]
@@ -133,6 +144,6 @@ class EncoderDecoderFilter(CNNFilter[CNNEsimate]):
                 self.model(input[None, ...])[-1, -1, ...].cpu().numpy()
             )
         # find peaks in the output by fitting gaussian mixture model
-        gmm = find_peaks(output, self.window, center=(self.window / 2, self.window / 2))
+        gmm = find_peaks(output, self.window, center=self.window_center)
         estimates = [CNNEsimate(mu, cov) for mu, cov in zip(gmm.means, gmm.covariances)]
         return self.time, estimates
