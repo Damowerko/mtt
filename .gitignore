@@ -6,3 +6,4 @@ data
 figures/
 .vscode/
 **/.ipynb_checkpoints/
+cluster/
