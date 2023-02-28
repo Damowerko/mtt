@@ -3,7 +3,18 @@ from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 from glob import glob
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import (
+    BinaryIO,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import numpy as np
 import numpy.typing as npt
@@ -16,7 +27,7 @@ from mtt.simulator import Simulator
 SimulationImages = Tuple[torch.Tensor, torch.Tensor, List[Dict]]
 
 
-def load_simulation_file(path: str) -> SimulationImages:
+def load_simulation_file(path: Union[str, BinaryIO]) -> SimulationImages:
     return torch.load(path, map_location="cpu")
 
 
@@ -41,30 +52,76 @@ def simulation_window(data: SimulationImages, length=20) -> List[SimulationImage
     return samples
 
 
+def random_window(data: SimulationImages, length=20) -> List[SimulationImages]:
+    """
+    Get one random window of length `length` from the simulation data.
+
+    Args:
+        data: the simulation data
+        length: the length of the sequences
+    """
+    sensor_imgs, position_imgs, infos = data
+    n_samples = len(sensor_imgs) - length + 1
+    i = np.random.randint(n_samples)
+    return [
+        (
+            sensor_imgs[i : i + length],
+            position_imgs[i : i + length],
+            infos[i : i + length],
+        )
+    ]
+
+
 def collate_fn(batch):
     sensor_imgs, position_imgs, infos = zip(*batch)
     return torch.stack(sensor_imgs), torch.stack(position_imgs), list(infos)
 
 
+T = TypeVar("T")
+
+
+def split_sequence(
+    sequence: Sequence[T], weights: Sequence[float]
+) -> Sequence[Sequence[T]]:
+    """
+    Split a sequence into several sequences based on the given splits.
+
+    Args:
+        sequence: the sequence to split
+        weights: the splits to use, don't have to be normalized
+    """
+    assert all(w >= 0 for w in weights), "splits must be positive"
+    if len(weights) == 0:
+        return []
+    elif len(weights) == 1:
+        return [sequence]
+    weights = [0.0] + list(weights)
+    # splits_idx start at 0 and end at len(sequence)
+    split_idx = np.cumsum(weights)
+    split_idx *= len(sequence) / split_idx[-1]
+    split_idx = np.round(split_idx).astype(int)
+    return [
+        sequence[split_idx[i] : split_idx[i + 1]] for i in range(len(split_idx) - 1)
+    ]
+
+
 def build_offline_datapipes(
-    root_dir="./data/train", length=20
+    root_dir="./data/train",
+    length=20,
+    weights: Sequence[float] = (0.95, 0.05),
 ) -> Tuple[IterDataPipe[SimulationImages], IterDataPipe[SimulationImages]]:
-    n_files = len(glob(os.path.join(root_dir, "*.pt")))
-    datapipes = dp.iter.FileLister(root_dir, "*.pt").random_split(
-        weights={"train": 0.95, "val": 0.05}, seed=42, total_length=n_files
-    )
+    all_filenames = glob(os.path.join(root_dir, "*.pt"))
+    splits = split_sequence(all_filenames, weights)
     return tuple(
         (
-            datapipe.shuffle()
-            .sharding_filter()  # we want each shard to have random simulations  # shard based on each file
-            # load the simulation data using the above functions
-            .map(load_simulation_file)
-            .map(partial(simulation_window, length=length))
-            # each batch is a collection of random windows from random simulations
-            .unbatch()
+            dp.map.SequenceWrapper(filenames)
             .shuffle()
+            .sharding_filter()  # distribute files to workers
+            .map(load_simulation_file)
+            .map(partial(random_window, length=length))
+            .unbatch()
         )
-        for datapipe in datapipes
+        for filenames in splits
     )
 
 
