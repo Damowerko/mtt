@@ -59,7 +59,7 @@ class EncoderDecoder(pl.LightningModule):
         optimizer: str = "adamw",
         lr: float = 1e-3,
         weight_decay: float = 0,
-        ospa_cutoff: float = 100,
+        ospa_cutoff: float = 500,
         **kwargs,
     ):
         super().__init__()

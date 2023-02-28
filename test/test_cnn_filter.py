@@ -1,8 +1,17 @@
 import numpy as np
 
-from mtt.cnn_filter import EncoderDecoderFilter
+from mtt.cnn_filter import EncoderDecoderFilter, convert_measurements
 from mtt.data import OnlineDataset
 from mtt.models import Conv2dCoder
+from mtt.utils import to_polar
+
+
+def test_convert_measurements_inverse():
+    measurements = np.array([[0, 1], [np.pi / 2, 1], [np.pi, 1], [3 * np.pi / 2, 1]])
+    converted_measurements = convert_measurements(measurements, from_lmco=True)
+    assert np.allclose(
+        measurements, convert_measurements(converted_measurements, from_lmco=False)
+    )
 
 
 def test_encoder_decoder():
@@ -20,12 +29,24 @@ def test_encoder_decoder():
         clutter,
         simulator,
     ) in dataset.iter_simulation():
+        window_center = np.array(
+            (simulator.window_width / 2, simulator.window_width / 2)
+        )
         # the CNN filter class takes in dicts not arrays
-        _measurements = {
-            i: np.concatenate((m, c), axis=0)
-            for i, (m, c) in enumerate(zip(measurements, clutter))
+        _measurements = {}
+        for i, (m, c) in enumerate(zip(measurements, clutter)):
+            _measurements[i] = np.concatenate((m, c), axis=0)
+            # convert to relative to sensor position
+            _measurements[i] -= sensor_positions[i]
+            # convert to polar coordinates
+            _measurements[i] = to_polar(_measurements[i])
+            # convert to LMCO convention
+            _measurements[i] = convert_measurements(_measurements[i], from_lmco=False)
+
+        # offset sensor positions to LMCO convention
+        _sensor_positions = {
+            i: s for i, s in enumerate(sensor_positions + window_center)
         }
-        _sensor_positions = {i: s for i, s in enumerate(sensor_positions)}
 
         filter.step(
             t,

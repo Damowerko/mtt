@@ -23,7 +23,7 @@ from mtt.utils import compute_ospa_components
 
 rng = np.random.default_rng()
 
-n_trials = 100  # number of simulations to run
+n_trials = 5  # number of simulations to run
 scale = 1  # the width of the area in km
 n_peaks_scale = 2.3  # older models' output should be scaled by 2.3
 queue = False  # should a deque be used to stack images
@@ -92,8 +92,12 @@ def run_gmphd(simulation: List[VectorData]):
 
 
 def run_smcphd(simulation: List[VectorData], adaptive_birth: bool = False):
+    if not adaptive_birth:
+        raise NotImplementedError(
+            "SMC-PHD without adaptive birth is no longer implemented."
+        )
     simulator = simulation[0].simulator
-    smc_phd = SMCPHD(simulator, 100, adaptive_birth=adaptive_birth)
+    smc_phd = SMCPHD(simulator, particles_per_target=1000, particles_per_measurement=10)
 
     positions: List[npt.NDArray[np.floating]] = []
     for d in simulation:
