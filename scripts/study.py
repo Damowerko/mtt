@@ -11,15 +11,16 @@ from pytorch_lightning.loggers.wandb import WandbLogger
 from torch.utils.data import DataLoader
 
 import wandb
-from mtt.data import build_offline_datapipes, collate_fn
+from mtt.data import OnlineDataset, build_offline_datapipes, collate_fn
 from mtt.models import Conv2dCoder
 
 BATCH_SIZE = 128
+TRAIN_STEPS = 200
 
 
 def main():
     torch.set_float32_matmul_precision("medium")
-    study_name = "mtt-test"
+    study_name = "mtt"
     storage = os.environ["OPTUNA_STORAGE"]
     study = optuna.create_study(
         study_name=study_name, storage=storage, load_if_exists=True
@@ -49,18 +50,25 @@ def objective(trial: optuna.trial.Trial) -> float:
         lr=trial.suggest_float("lr", 1e-5, 1e-1, log=True),
         weight_decay=trial.suggest_float("weight_decay", 1e-5, 1e-1, log=True),
     )
-    train_dp, val_dp = build_offline_datapipes("/nfs/general/mtt_data/train")
+    # download data to disk
+    train_dataset = OnlineDataset(
+        n_steps=TRAIN_STEPS,
+        pin_memory=True,
+    )
+    val_dataset = OnlineDataset(
+        n_steps=20,
+        pin_memory=True,
+    )
     train_loader = DataLoader(
-        dataset=train_dp,
+        dataset=train_dataset,
         batch_size=BATCH_SIZE,
-        num_workers=min(torch.multiprocessing.cpu_count(), 16),
+        num_workers=min(torch.multiprocessing.cpu_count(), 32),
         pin_memory=True,
         collate_fn=collate_fn,
     )
     val_loader = DataLoader(
-        dataset=val_dp,
-        batch_size=BATCH_SIZE,
-        num_workers=min(torch.multiprocessing.cpu_count(), 16),
+        dataset=val_dataset,
+        num_workers=min(torch.multiprocessing.cpu_count(), 32),
         pin_memory=True,
         collate_fn=collate_fn,
     )
@@ -69,7 +77,7 @@ def objective(trial: optuna.trial.Trial) -> float:
         PyTorchLightningPruningCallback(trial, monitor="val/loss"),
     ]
     trainer = pl.Trainer(
-        # logger=logger,
+        logger=logger,
         callbacks=callbacks,
         precision=32,
         max_epochs=100,

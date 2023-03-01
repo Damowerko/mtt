@@ -239,7 +239,7 @@ class OnlineDataset(IterableDataset):
             sensor_positions=sensor_positions,
             measurements=measurements,
             clutter=clutter,
-            window=simulator.window,
+            window=simulator.window_width,
         )
         return sensor_img, position_img, info
 
