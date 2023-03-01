@@ -18,7 +18,6 @@ def init_simulator():
 
 
 def get_trainer(params: argparse.Namespace) -> pl.Trainer:
-    run_id = os.environ.get("RUN_ID", None)
     logger: Union[List[Logger], bool] = (
         False
         if params.no_log
@@ -69,32 +68,37 @@ def get_checkpoint_path() -> Union[str, None]:
 
 
 def train(params: argparse.Namespace):
-    train_dp, val_dp = build_offline_datapipes("/nfs/general/mtt_data/train")
+    train_dp, val_dp = build_offline_datapipes(
+        "/nfs/general/mtt_data/train", map_location="cpu"
+    )
+    num_workers = min(torch.multiprocessing.cpu_count(), 4)
     train_loader = DataLoader(
         dataset=train_dp,
-        batch_size=params.batch_size,
-        num_workers=min(torch.multiprocessing.cpu_count(), 32),
-        pin_memory=True,
         collate_fn=collate_fn,
+        batch_size=params.batch_size,
+        num_workers=num_workers,
+        pin_memory=True,
+        prefetch_factor=4,
     )
     val_loader = DataLoader(
         dataset=val_dp,
-        batch_size=params.batch_size,
-        num_workers=min(torch.multiprocessing.cpu_count(), 32),
-        pin_memory=True,
         collate_fn=collate_fn,
+        batch_size=params.batch_size,
+        num_workers=num_workers,
+        pin_memory=True,
+        prefetch_factor=4,
     )
     trainer = get_trainer(params)
     model = Conv2dCoder(**vars(params))
     trainer.fit(model, train_loader, val_loader, ckpt_path=get_checkpoint_path())
-    test(params)
 
 
 def test(params: argparse.Namespace):
+    num_workers = min(torch.multiprocessing.cpu_count(), 4)
     test_loader = DataLoader(
         get_online_dataset(params),
         batch_size=params.batch_size,
-        num_workers=min(torch.multiprocessing.cpu_count(), 32),
+        num_workers=num_workers,
         pin_memory=True,
         collate_fn=collate_fn,
     )

@@ -27,8 +27,10 @@ from mtt.simulator import Simulator
 SimulationImages = Tuple[torch.Tensor, torch.Tensor, List[Dict]]
 
 
-def load_simulation_file(path: Union[str, BinaryIO]) -> SimulationImages:
-    return torch.load(path, map_location="cpu")
+def load_simulation_file(
+    path: Union[str, BinaryIO], map_location="cpu"
+) -> SimulationImages:
+    return torch.load(path, map_location=map_location)
 
 
 def simulation_window(data: SimulationImages, length=20) -> List[SimulationImages]:
@@ -108,17 +110,21 @@ def split_sequence(
 def build_offline_datapipes(
     root_dir="./data/train",
     length=20,
-    weights: Sequence[float] = (0.95, 0.05),
+    weights: Sequence[float] = (0.99, 0.01),
+    map_location="cpu",
+    max_files=None,
 ) -> Tuple[IterDataPipe[SimulationImages], IterDataPipe[SimulationImages]]:
     all_filenames = glob(os.path.join(root_dir, "*.pt"))
     splits = split_sequence(all_filenames, weights)
     return tuple(
         (
             dp.map.SequenceWrapper(filenames)
-            .shuffle()
+            .shuffle()  # need to shuffle before sharding
+            .header(max_files or len(filenames))
             .sharding_filter()  # distribute files to workers
-            .map(load_simulation_file)
-            .map(partial(random_window, length=length))
+            .map(partial(load_simulation_file, map_location=map_location))
+            .map(partial(simulation_window, length=length))
+            .in_batch_shuffle()
             .unbatch()
         )
         for filenames in splits
@@ -243,7 +249,7 @@ class OnlineDataset(IterableDataset):
         )
         return sensor_img, position_img, info
 
-    def stack_images(self, images, queue=True):
+    def stack_images(self, images, queue=False):
         if queue:
             sensor_imgs = deque(maxlen=self.length)
             position_imgs = deque(maxlen=self.length)

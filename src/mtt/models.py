@@ -54,7 +54,7 @@ class EncoderDecoder(pl.LightningModule):
         self,
         img_size: int = 128,
         input_length: int = 20,
-        output_length: int = 20,
+        output_length: int = 1,
         loss_fn: str = "l2",
         optimizer: str = "adamw",
         lr: float = 1e-3,
@@ -90,6 +90,7 @@ class EncoderDecoder(pl.LightningModule):
     def truncate_batch(self, batch):
         input_img, target_img, info = batch
         target_img = target_img[:, -self.output_shape[0] :]
+        info = [_info[-self.output_shape[0] :] for _info in info]
         return input_img, target_img, info
 
     def training_step(self, batch, *_):
@@ -102,10 +103,12 @@ class EncoderDecoder(pl.LightningModule):
 
     def validation_step(self, batch, *_):
         batch = self.truncate_batch(batch)
-        input_img, target_img, *_ = batch
+        input_img, target_img, info = batch
         output_img = self(input_img)
         loss = self.loss(output_img, target_img)
         self.log("val/loss", loss, prog_bar=True)
+        cardinality_mae = self.cardinality_errors(batch, output_img).abs().mean()
+        self.log("val/cardinality_mae", cardinality_mae, prog_bar=True)
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
     def test_step(self, batch, *_):
@@ -147,6 +150,17 @@ class EncoderDecoder(pl.LightningModule):
             Y = info[i][-1]["target_positions"]
             ospa_value += compute_ospa(X, Y, self.ospa_cutoff, p=2)
         return ospa_value / output_img.shape[0]
+
+    def cardinality_errors(self, batch, output_img):
+        input_img, _, info = batch
+        output_img = self(input_img)
+        cardinality_estimates = output_img.abs().sum(dim=(2, 3)).cpu()
+        cardinality_truth = torch.zeros_like(cardinality_estimates)
+        for i in range(cardinality_estimates.shape[0]):
+            for j in range(cardinality_estimates.shape[1]):
+                cardinality_truth[i, j] = len(info[i][j]["target_positions"])
+        cardinality_errors = cardinality_estimates - cardinality_truth
+        return cardinality_errors
 
     def configure_optimizers(self):
         # pick optimizer
