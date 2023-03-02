@@ -69,7 +69,7 @@ def get_checkpoint_path() -> Union[str, None]:
 
 def train(params: argparse.Namespace):
     train_dp, val_dp = build_offline_datapipes(
-        "/nfs/general/mtt_data/train", map_location="cpu"
+        "/nfs/general/mtt_data/train", map_location="cpu", max_files=1000
     )
     num_workers = min(torch.multiprocessing.cpu_count(), 4)
     train_loader = DataLoader(
@@ -116,7 +116,7 @@ if __name__ == "__main__":
 
     # data arguments
     group = parser.add_argument_group("Data")
-    group.add_argument("--batch_size", type=int, default=16)
+    group.add_argument("--batch_size", type=int, default=32)
 
     # model arguments
     group = parser.add_argument_group("Model")

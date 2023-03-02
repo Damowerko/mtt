@@ -116,19 +116,27 @@ def build_offline_datapipes(
 ) -> Tuple[IterDataPipe[SimulationImages], IterDataPipe[SimulationImages]]:
     all_filenames = glob(os.path.join(root_dir, "*.pt"))
     splits = split_sequence(all_filenames, weights)
-    return tuple(
-        (
+
+    # load one file to compute the length
+    test_data = load_simulation_file(all_filenames[0], map_location=map_location)
+    test_data = simulation_window(test_data, length=length)
+    samples_per_file = len(test_data)  # test_data[0] are the stacks of sensor images
+    datapipes = []
+    for filenames in splits:
+        n_files = min(len(filenames), max_files or len(filenames))
+        print(f"Loading {n_files} files with {samples_per_file} samples per file.")
+        datapipes.append(
             dp.map.SequenceWrapper(filenames)
             .shuffle()  # need to shuffle before sharding
-            .header(max_files or len(filenames))
-            .sharding_filter()  # distribute files to workers
+            .header(n_files)  # get the first n_files
+            .sharding_filter()  # distribute filenames to workers
             .map(partial(load_simulation_file, map_location=map_location))
             .map(partial(simulation_window, length=length))
             .in_batch_shuffle()
             .unbatch()
+            .set_length(samples_per_file * n_files)
         )
-        for filenames in splits
-    )
+    return tuple(datapipes)
 
 
 class OfflineDataset(Dataset):

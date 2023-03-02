@@ -5,21 +5,22 @@ from typing import List
 import optuna
 import pytorch_lightning as pl
 import torch
-import wandb
 from optuna.integration.pytorch_lightning import PyTorchLightningPruningCallback
-from pytorch_lightning.callbacks import Callback, ModelCheckpoint
+from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers.wandb import WandbLogger
 from torch.utils.data import DataLoader
 
+import wandb
 from mtt.data import build_offline_datapipes, collate_fn
 from mtt.models import Conv2dCoder
 
-BATCH_SIZE = 16
+BATCH_SIZE = 32
 FILES_PER_EPOCH = 1000
+MAX_EPOCHS = 20
 
 
 def main():
-    torch.set_float32_matmul_precision("medium")
+    torch.set_float32_matmul_precision("high")
     study_name = "mtt-fullconv"
     storage = os.environ["OPTUNA_STORAGE"]
     study = optuna.create_study(
@@ -39,14 +40,14 @@ def objective(trial: optuna.trial.Trial) -> float:
     trial.set_user_attr("batch_size", BATCH_SIZE)
 
     params = argparse.Namespace(
-        n_encoder=trial.suggest_int("n_layers", 1, 5),
+        n_encoder=trial.suggest_int("n_encoder", 1, 5),
         n_hidden=trial.suggest_int("n_hidden", 1, 10),
         n_channels=trial.suggest_int("n_channels", 1, 256),
         n_channels_hidden=trial.suggest_int("n_channels_hidden", 1, 256),
         kernel_size=trial.suggest_int("kernel_size", 1, 11),
         batch_norm=trial.suggest_categorical("batch_norm", [True, False]),
-        activation=trial.suggest_categorical("activation", ["relu", "leaky_relu"]),
-        optimizer=trial.suggest_categorical("optimizer", ["sgd", "adamw"]),
+        activation="leaky_relu",  # trial.suggest_categorical("activation", ["relu", "leaky_relu"]),
+        optimizer="adamw",  # trial.suggest_categorical("optimizer", ["sgd", "adamw"]),
         lr=trial.suggest_float("lr", 1e-5, 1e-1, log=True),
         weight_decay=trial.suggest_float("weight_decay", 1e-5, 1e-1, log=True),
     )
@@ -74,15 +75,16 @@ def objective(trial: optuna.trial.Trial) -> float:
     callbacks: List[Callback] = [
         ModelCheckpoint(monitor="val/loss", mode="min", save_top_k=1),
         PyTorchLightningPruningCallback(trial, monitor="val/loss"),
+        EarlyStopping(monitor="val/loss", patience=3),
     ]
     trainer = pl.Trainer(
         logger=logger,
         callbacks=callbacks,
         precision=32,
-        max_epochs=100,
+        max_epochs=MAX_EPOCHS,
         accelerator="gpu",
         devices=1,
-        enable_progress_bar=False,
+        enable_progress_bar=True,
     )
     model = Conv2dCoder(**vars(params))
     print("Starting training")
