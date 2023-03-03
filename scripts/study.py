@@ -5,12 +5,12 @@ from typing import List
 import optuna
 import pytorch_lightning as pl
 import torch
+import wandb
 from optuna.integration.pytorch_lightning import PyTorchLightningPruningCallback
 from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers.wandb import WandbLogger
 from torch.utils.data import DataLoader
 
-import wandb
 from mtt.data import build_offline_datapipes, collate_fn
 from mtt.models import Conv2dCoder
 
@@ -26,7 +26,9 @@ def main():
     study = optuna.create_study(
         study_name=study_name, storage=storage, load_if_exists=True
     )
-    study.optimize(objective, n_trials=1)
+    study.optimize(objective, n_trials=100)
+    # make sure to exit cleanly otherwise MPS server will be in an undefined state
+    torch.cuda.synchronize()
 
 
 def objective(trial: optuna.trial.Trial) -> float:
@@ -61,7 +63,7 @@ def objective(trial: optuna.trial.Trial) -> float:
         collate_fn=collate_fn,
         batch_size=BATCH_SIZE,
         num_workers=num_workers,
-        pin_memory=True,
+        # pin_memory=True,
         prefetch_factor=4,
     )
     val_loader = DataLoader(
@@ -69,7 +71,7 @@ def objective(trial: optuna.trial.Trial) -> float:
         collate_fn=collate_fn,
         batch_size=BATCH_SIZE,
         num_workers=num_workers,
-        pin_memory=True,
+        # pin_memory=True,
         prefetch_factor=4,
     )
     callbacks: List[Callback] = [
