@@ -11,7 +11,7 @@ from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers.wandb import WandbLogger
 from torch.utils.data import DataLoader
 
-from mtt.data import build_offline_datapipes, collate_fn
+from mtt.data import build_train_datapipes, collate_fn
 from mtt.models import Conv2dCoder
 
 BATCH_SIZE = 32
@@ -35,7 +35,7 @@ def objective(trial: optuna.trial.Trial) -> float:
     # configure logging
     logger = WandbLogger(
         project="mtt",
-        log_model="best",
+        log_model=True,
         group=trial.study.study_name,
     )
     trial.set_user_attr("wandb_id", logger.experiment.id)
@@ -54,7 +54,7 @@ def objective(trial: optuna.trial.Trial) -> float:
         weight_decay=trial.suggest_float("weight_decay", 1e-5, 1e-1, log=True),
     )
     # download data to disk
-    train_dp, val_dp = build_offline_datapipes(
+    train_dp, val_dp = build_train_datapipes(
         "/nfs/general/mtt_data/train", max_files=FILES_PER_EPOCH
     )
     num_workers = min(torch.multiprocessing.cpu_count(), 4)

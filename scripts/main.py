@@ -1,122 +1,35 @@
 import argparse
+from functools import partial
+from glob import glob
 import os
 from typing import List, Union
 
+import optuna
 import pytorch_lightning as pl
 import torch
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+import wandb
+from optuna.integration.pytorch_lightning import PyTorchLightningPruningCallback
+from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import Logger, TensorBoardLogger
+from pytorch_lightning.loggers.wandb import WandbLogger
 from torch.utils.data import DataLoader
 
-from mtt.data import OnlineDataset, build_offline_datapipes, collate_fn
+from mtt.data import OnlineDataset, build_train_datapipes, collate_fn
 from mtt.models import Conv2dCoder
 from mtt.simulator import Simulator
 
 
-def init_simulator():
-    return Simulator()
-
-
-def get_trainer(params: argparse.Namespace) -> pl.Trainer:
-    logger: Union[List[Logger], bool] = (
-        False
-        if params.no_log
-        else [TensorBoardLogger(save_dir="./", name="tensorboard", version="")]
-    )
-    callbacks = [
-        ModelCheckpoint(
-            monitor="train/loss",
-            dirpath="./checkpoints",
-            filename="best",
-            auto_insert_metric_name=False,
-            mode="min",
-            save_last=True,
-            save_top_k=1,
-        )
-        if not params.no_log
-        else None,
-        EarlyStopping(
-            monitor="train/loss",
-            patience=params.patience,
-        ),
-    ]
-    callbacks = [c for c in callbacks if c is not None]
-    return pl.Trainer(
-        logger=logger,
-        callbacks=callbacks,
-        enable_checkpointing=not params.no_log,
-        precision=32,
-        gpus=params.gpus,
-        max_epochs=params.max_epochs,
-        default_root_dir=".",
-        check_val_every_n_epoch=1,
-    )
-
-
-def get_online_dataset(params: argparse.Namespace, n_steps=100):
-    return OnlineDataset(
-        length=params.input_length,
-        init_simulator=init_simulator,
-        n_steps=n_steps,
-        **vars(params),
-    )
-
-
-def get_checkpoint_path() -> Union[str, None]:
-    ckpt_path = "./checkpoints/best.ckpt"
-    return ckpt_path if os.path.exists(ckpt_path) else None
-
-
-def train(params: argparse.Namespace):
-    train_dp, val_dp = build_offline_datapipes(
-        "/nfs/general/mtt_data/train", map_location="cpu", max_files=1000
-    )
-    num_workers = min(torch.multiprocessing.cpu_count(), 4)
-    train_loader = DataLoader(
-        dataset=train_dp,
-        collate_fn=collate_fn,
-        batch_size=params.batch_size,
-        num_workers=num_workers,
-        pin_memory=True,
-        prefetch_factor=4,
-    )
-    val_loader = DataLoader(
-        dataset=val_dp,
-        collate_fn=collate_fn,
-        batch_size=params.batch_size,
-        num_workers=num_workers,
-        pin_memory=True,
-        prefetch_factor=4,
-    )
-    trainer = get_trainer(params)
-    model = Conv2dCoder(**vars(params))
-    trainer.fit(model, train_loader, val_loader, ckpt_path=get_checkpoint_path())
-
-
-def test(params: argparse.Namespace):
-    num_workers = min(torch.multiprocessing.cpu_count(), 4)
-    test_loader = DataLoader(
-        get_online_dataset(params),
-        batch_size=params.batch_size,
-        num_workers=num_workers,
-        pin_memory=True,
-        collate_fn=collate_fn,
-    )
-    trainer = get_trainer(params)
-    model = Conv2dCoder(**vars(params))
-    trainer.test(model, test_loader, ckpt_path=get_checkpoint_path())
-
-
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser()
 
     # program arguments
-    parser.add_argument("operation", choices=["train", "test"])
+    parser.add_argument("operation", choices=["train", "test", "study"])
     parser.add_argument("--no_log", action="store_true")
 
     # data arguments
     group = parser.add_argument_group("Data")
     group.add_argument("--batch_size", type=int, default=32)
+    group.add_argument("--files_per_epoch", type=int, default=1000)
 
     # model arguments
     group = parser.add_argument_group("Model")
@@ -127,11 +40,195 @@ if __name__ == "__main__":
     group.add_argument("--max_epochs", type=int, default=1000)
     group.add_argument("--gpus", type=int, default=1)
     group.add_argument("--patience", type=int, default=10)
+    group.add_argument(
+        "--map_location",
+        type=str,
+        default="cpu",
+        help="The torch device onto which data will be loaded: cpu or cuda.",
+    )
 
     params = parser.parse_args()
     if params.operation == "train":
-        train(params)
+        train(make_trainer(params), params)
     elif params.operation == "test":
-        test(params)
+        test(make_trainer(params), params)
+    elif params.operation == "study":
+        study(params)
     else:
         raise ValueError(f"Unknown operation: {params.operation}")
+
+
+def train(trainer: pl.Trainer, params: argparse.Namespace):
+    torch.set_float32_matmul_precision("high")
+    train_dp, val_dp = build_train_datapipes(
+        "/nfs/general/mtt_data/train",
+        max_files=params.files_per_epoch,
+        map_location=params.map_location,
+    )
+    dataloader_kwargs = dict(
+        batch_size=params.batch_size,
+        collate_fn=collate_fn,
+    )
+    if params.map_location == "cpu":
+        dataloader_kwargs = dict(
+            **dataloader_kwargs,
+            pin_memory=True,
+            prefetch_factor=4,
+            num_workers=min(torch.multiprocessing.cpu_count(), 4),
+        )
+
+    train_loader = DataLoader(train_dp, **dataloader_kwargs)
+    val_loader = DataLoader(val_dp, **dataloader_kwargs)
+    model = Conv2dCoder(**vars(params))
+    trainer.fit(model, train_loader, val_loader, ckpt_path=get_checkpoint_path())
+    test(trainer, params)
+
+
+def test(trainer: pl.Trainer, params: argparse.Namespace):
+    test_loader = DataLoader(
+        get_test_dataset(params),
+        batch_size=1,
+        num_workers=min(torch.multiprocessing.cpu_count(), 4),
+        pin_memory=True,
+        collate_fn=collate_fn,
+    )
+    trainer = make_trainer(params)
+    model = Conv2dCoder(**vars(params))
+    trainer.test(model, test_loader, ckpt_path=get_checkpoint_path())
+
+
+def study(params: argparse.Namespace):
+    torch.set_float32_matmul_precision("high")
+    study_name = "mtt-fullconv"
+    storage = os.environ["OPTUNA_STORAGE"]
+    study = optuna.create_study(
+        study_name=study_name, storage=storage, load_if_exists=True
+    )
+    study.optimize(partial(objective, default_params=params), n_trials=100)
+
+
+def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace) -> float:
+    study_params = dict(
+        n_encoder=trial.suggest_int("n_encoder", 1, 5),
+        n_hidden=trial.suggest_int("n_hidden", 1, 10),
+        n_channels=trial.suggest_int("n_channels", 1, 256),
+        n_channels_hidden=trial.suggest_int("n_channels_hidden", 1, 256),
+        kernel_size=trial.suggest_int("kernel_size", 1, 11),
+        batch_norm=trial.suggest_categorical("batch_norm", [True, False]),
+        activation="leaky_relu",  # trial.suggest_categorical("activation", ["relu", "leaky_relu"]),
+        optimizer="adamw",  # trial.suggest_categorical("optimizer", ["sgd", "adamw"]),
+        lr=trial.suggest_float("lr", 1e-5, 1e-1, log=True),
+        weight_decay=trial.suggest_float("weight_decay", 1e-5, 1e-1, log=True),
+    )
+    params = argparse.Namespace(**{**vars(default_params), **study_params})
+
+    # configure trainer
+    logger = WandbLogger(
+        project="mtt",
+        log_model=True,
+        group=trial.study.study_name,
+    )
+    callbacks: List[Callback] = [
+        ModelCheckpoint(
+            monitor="val/loss",
+            dirpath="./checkpoints",
+            filename="best",
+            auto_insert_metric_name=False,
+            mode="min",
+            save_top_k=1,
+        ),
+        EarlyStopping(monitor="val/loss", patience=params.patience),
+        PyTorchLightningPruningCallback(trial, monitor="val/loss"),
+    ]
+    trainer = pl.Trainer(
+        logger=logger,
+        callbacks=callbacks,
+        precision=32,
+        max_epochs=params.max_epochs,
+        accelerator="gpu",
+        devices=1,
+    )
+    train(trainer, params)
+
+    # finish up
+    trial.set_user_attr("wandb_id", logger.experiment.id)
+    wandb.finish()
+    return trainer.callback_metrics["val/loss"].item()
+
+
+def init_simulator():
+    return Simulator()
+
+
+def make_trainer(params: argparse.Namespace) -> pl.Trainer:
+    if params.no_log:
+        logger = False
+    else:
+        # resume wandb run if it exists
+        wandb_kwargs = dict(
+            project="mtt",
+            log_model=True,
+        )
+        if os.path.exists("checkpoints/best.ckpt"):
+            wandb_kwargs["resume"] = "must"
+            wandb_kwargs["version"] = glob("wandb/run-*")[0].split("-")[-1]
+            print(f"Resuming wandb run {wandb_kwargs['version']}.")
+
+        # create loggers
+        logger = [
+            TensorBoardLogger(save_dir="./", name="tensorboard", version=""),
+            WandbLogger(**wandb_kwargs),
+        ]
+
+    callbacks = [
+        ModelCheckpoint(
+            monitor="val/loss",
+            dirpath="./checkpoints",
+            filename="best",
+            auto_insert_metric_name=False,
+            mode="min",
+            save_top_k=1,
+            save_last=True,
+        )
+        if not params.no_log
+        else None,
+        EarlyStopping(
+            monitor="val/loss",
+            patience=params.patience,
+        ),
+    ]
+    callbacks = [c for c in callbacks if c is not None]
+    return pl.Trainer(
+        logger=logger,
+        callbacks=callbacks,
+        enable_checkpointing=not params.no_log,
+        precision=32,
+        accelerator="auto",
+        devices=1,
+        max_epochs=params.max_epochs,
+        default_root_dir=".",
+    )
+
+
+def get_checkpoint_path() -> Union[str, None]:
+    ckpt_path = "./checkpoints/best.ckpt"
+    return ckpt_path if os.path.exists(ckpt_path) else None
+
+
+def get_test_dataset(params: argparse.Namespace, n_steps=100):
+    return OnlineDataset(
+        **dict(
+            **vars(params),
+            length=params.input_length,
+            init_simulator=init_simulator,
+            n_steps=n_steps,
+        )
+    )
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    finally:
+        # exit or the MPS server might be in an undefined state
+        torch.cuda.synchronize()

@@ -1,11 +1,11 @@
-import os
 import argparse
+import os
 
-import tqdm
 import torch
+import tqdm
+import pickle
 
-from mtt.data import OnlineDataset
-from mtt.data import generate_data
+from mtt.data import OnlineDataset, generate_vectors
 
 
 def main(args):
@@ -16,15 +16,23 @@ def main(args):
 
     online_dataset = OnlineDataset(n_steps=119, length=20, img_size=128, device="cuda")
     # start a generator that will yeild a simulation with 119 steps (see data.py)
-    generator = generate_data(
-        online_dataset,
-        args.n_simulations,
+    vectors_list = list(
+        generate_vectors(
+            online_dataset,
+            args.n_simulations,
+        )
     )
+    # save the simulation data
+    with open(os.path.join(args.out_dir, "simulations.pkl"), "wb") as f:
+        pickle.dump(vectors_list, f)
+
+    if args.no_images:
+        return
     for i, simulation in tqdm.tqdm(
-        enumerate(generator),
+        enumerate(vectors_list),
         total=args.n_simulations,
-        desc="Generating dataset",
-        unit="sims",
+        desc="Generating images",
+        unit="image",
     ):
         with open(os.path.join(args.out_dir, f"{i}.pt"), "wb") as f:
             torch.save(simulation, f)
@@ -34,5 +42,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-o", "--out-dir", type=str, default="./data/train/")
     parser.add_argument("-n", "--n-simulations", type=int, default=100)
+    parser.add_argument(
+        "-s", "--scale", type=int, default=1, help="Scale of the simulation in km."
+    )
+    parser.add_argument(
+        "--no-images",
+        action="store_true",
+        help="Don't generate images. Only save the simulation data.",
+    )
     args = parser.parse_args()
     main(args)

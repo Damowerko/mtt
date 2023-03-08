@@ -2,7 +2,7 @@ import os
 import pickle as pkl
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
-from typing import Dict, List
+from typing import Dict, List, Sequence
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,13 +23,13 @@ from mtt.utils import compute_ospa_components
 
 rng = np.random.default_rng()
 
-n_trials = 5  # number of simulations to run
+n_trials = 10  # number of simulations to run
 scale = 1  # the width of the area in km
 n_peaks_scale = 2.3  # older models' output should be scaled by 2.3
 queue = False  # should a deque be used to stack images
 
 # which if any phd filters should be run
-phd_enable = scale == 1
+phd_enable = False
 
 data_dir = f"data/test/{scale}km"
 simulations_file = os.path.join(data_dir, "simulations.pkl")
@@ -56,7 +56,7 @@ prediction_length = online_dataset.n_steps - online_dataset.length + 1
 
 
 def run_simulation(*_):
-    return list(online_dataset.iter_simulation())
+    return list(online_dataset.iter_vectors())
 
 
 # SIMULATIONS
@@ -113,7 +113,7 @@ run_filter_funcitons = {
     "SMC-PHD (adaptive)": partial(run_smcphd, adaptive_birth=True),
 }
 # for each filter store predicted positions in a dictionary
-predicted_positions: Dict[str, List[List[npt.NDArray[np.float64]]]] = {}
+predicted_positions: Dict[str, Sequence[Sequence[npt.NDArray[np.float64]]]] = {}
 for name, run_phd in run_filter_funcitons.items():
     if not phd_enable:
         continue
@@ -141,36 +141,43 @@ model = load_model(Conv2dCoder, "58c6fd8a")
 
 def run_cnn(simulation: List[VectorData]):
     predictions_cnn: List[npt.NDArray] = []
+    mse_cnn: List[npt.NDArray] = []
     with torch.no_grad():
         images = map(online_dataset.vectors_to_images, *zip(*simulation))
         window = simulation[0].simulator.window_width
         filt_idx = -1
-        for sensor_imgs, _, _ in online_dataset.stack_images(images, queue=queue):
-            pred_imgs = model(sensor_imgs.cuda()).cpu().numpy()
+        for sensor_imgs, target_imgs, _ in online_dataset.stack_images(
+            images, queue=queue
+        ):
+            pred_imgs = model(sensor_imgs.cuda())
+            target_imgs = target_imgs[: model.output_shape[0], ...]
+            mse_cnn += [((pred_imgs - target_imgs) ** 2).mean().cpu().numpy()]
+
             # fit a gmm and get the mean of each gaussian in the gmm
+            pred_imgs_numpy = pred_imgs.cpu().numpy()
             predictions_cnn += [
                 find_peaks(
-                    pred_imgs[filt_idx], width=window, n_peaks_scale=n_peaks_scale
+                    pred_imgs_numpy[filt_idx], width=window, n_peaks_scale=n_peaks_scale
                 )[0]
             ]
-    return predictions_cnn
+    return predictions_cnn, predictions_cnn
 
 
 cnn_filename = os.path.join(data_dir, "CNN.pkl")
 if os.path.exists(cnn_filename):
     with open(cnn_filename, "rb") as f:
-        predicted_positions["CNN"] = pkl.load(f)[:n_trials]
+        mse_cnn, predicted_positions["CNN"] = pkl.load(f)[:n_trials]
 else:
     # run the CNN, since we use GPU we do not parallelize
-    predicted_positions["CNN"] = list(
-        tqdm(
+    mse_cnn, predicted_positions["CNN"] = zip(
+        *tqdm(
             map(run_cnn, simulations),
             total=len(simulations),
             desc="Running CNN filter",
         )
     )
     with open(cnn_filename, "wb") as f:
-        pkl.dump(predicted_positions["CNN"], f)
+        pkl.dump((mse_cnn, predicted_positions["CNN"]), f)
 
 # extract the true positions
 true_positions: List[List[npt.NDArray[np.floating]]] = []

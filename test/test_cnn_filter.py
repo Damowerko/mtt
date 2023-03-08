@@ -28,7 +28,7 @@ def test_encoder_decoder():
         measurements,
         clutter,
         simulator,
-    ) in dataset.iter_simulation():
+    ) in dataset.iter_vectors():
         window_center = np.array(
             (simulator.window_width / 2, simulator.window_width / 2)
         )
