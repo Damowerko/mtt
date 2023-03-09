@@ -107,13 +107,13 @@ def study(params: argparse.Namespace):
     torch.set_float32_matmul_precision("high")
     study_name = "mtt-validconv"
     storage = os.environ["OPTUNA_STORAGE"]
-    # train for at least 5 epochs, this avoids high loss values adding noise to data
-    # I checked the code and optuna n_warmup_steps is the number of epochs
-    pruner = optuna.pruners.MedianPruner(n_warmup_steps=5)
+    pruner = optuna.pruners.HyperbandPruner(
+        min_resource=5, max_resource=100, reduction_factor=3
+    )
     study = optuna.create_study(
         study_name=study_name, storage=storage, load_if_exists=True, pruner=pruner
     )
-    study.optimize(partial(objective, default_params=params), n_trials=100)
+    study.optimize(partial(objective, default_params=params), n_trials=1)
 
 
 def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace) -> float:
