@@ -4,6 +4,7 @@ from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 from glob import glob
+from itertools import chain
 from typing import (
     BinaryIO,
     Callable,
@@ -102,60 +103,31 @@ def collate_fn(batch: List[ImageData]) -> StackedImageData:
 T = TypeVar("T")
 
 
-def split_sequence(
-    sequence: Sequence[T], weights: Sequence[float]
-) -> Sequence[Sequence[T]]:
-    """
-    Split a sequence into several sequences based on the given splits.
-
-    Args:
-        sequence: the sequence to split
-        weights: the splits to use, don't have to be normalized
-    """
-    assert all(w >= 0 for w in weights), "splits must be positive"
-    if len(weights) == 0:
-        return []
-    elif len(weights) == 1:
-        return [sequence]
-    weights = [0.0] + list(weights)
-    # splits_idx start at 0 and end at len(sequence)
-    split_idx = np.cumsum(weights)
-    split_idx *= len(sequence) / split_idx[-1]
-    split_idx = np.round(split_idx).astype(int)
-    return [
-        sequence[split_idx[i] : split_idx[i + 1]] for i in range(len(split_idx) - 1)
-    ]
-
-
-def build_train_datapipes(
+def build_train_datapipe(
     root_dir="./data/train",
     length=20,
-    weights: Sequence[float] = (0.99, 0.01),
     map_location="cpu",
     max_files=None,
-) -> Tuple[IterDataPipe[StackedImageData], ...]:
-    all_filenames = sorted(glob(os.path.join(root_dir, "*.pt")))
-    splits = split_sequence(all_filenames, weights)
+) -> IterDataPipe[StackedImageData]:
+    filenames = sorted(glob(os.path.join(root_dir, "*.pt")))
 
     # load one file to compute the length
-    test_data = load_simulation_file(all_filenames[0], map_location=map_location)
+    test_data = load_simulation_file(filenames[0], map_location=map_location)
     test_data = simulation_window(test_data, length=length)
     samples_per_file = len(test_data)  # test_data[0] are the stacks of sensor images
-    datapipes = []
-    for filenames in splits:
-        n_files = min(len(filenames), max_files or len(filenames))
-        datapipes.append(
-            dp.map.SequenceWrapper(filenames)
-            .shuffle()  # need to shuffle before sharding
-            .header(n_files)  # get the first n_files
-            .sharding_filter()  # distribute filenames to workers
-            .map(partial(load_simulation_file, map_location=map_location))
-            .map(partial(simulation_window, length=length))
-            .in_batch_shuffle()
-            .unbatch()
-            .set_length(samples_per_file * n_files)
-        )
-    return tuple(datapipes)
+    n_files = min(len(filenames), max_files or len(filenames))
+
+    return (
+        dp.map.SequenceWrapper(filenames)
+        .shuffle()  # need to shuffle before sharding
+        .header(n_files)  # get the first n_files
+        .sharding_filter()  # distribute filenames to workers
+        .map(partial(load_simulation_file, map_location=map_location))
+        .map(partial(simulation_window, length=length))
+        .in_batch_shuffle()
+        .unbatch()
+        .set_length(samples_per_file * n_files)
+    )
 
 
 def _transform_simulation(simulation_vectors: List[VectorData], **kwargs):
@@ -211,6 +183,7 @@ def vector_to_image(
 class OnlineDataset(IterableDataset):
     def __init__(
         self,
+        n_experiments: int = 1,
         n_steps: int = 100,
         length: int = 20,
         img_size: int = 128,
@@ -229,6 +202,7 @@ class OnlineDataset(IterableDataset):
             init_simulator: Function used to initialize the simulator, should **not** be a lambda.
         """
         super().__init__()
+        self.n_experiments = n_experiments
         self.n_steps = n_steps
         self.length = length
         self.img_size = img_size
@@ -272,7 +246,13 @@ class OnlineDataset(IterableDataset):
             device=self.device,
         )
 
-    def stack_images(self, images, queue=False):
+    def iter_images(self, simulator: Optional[Simulator] = None):
+        simulator = self.init_simulator() if simulator is None else simulator
+        with torch.no_grad():
+            for vector_data in self.iter_vectors(simulator):
+                yield self.vector_to_image(vector_data)
+
+    def stack_images(self, images: Iterable[ImageData], queue=False):
         if queue:
             sensor_imgs = deque(maxlen=self.length)
             position_imgs = deque(maxlen=self.length)
@@ -296,17 +276,13 @@ class OnlineDataset(IterableDataset):
                     infos[i : i + self.length],
                 )
 
-    def iter_images(self, simulator: Optional[Simulator] = None):
-        simulator = self.init_simulator() if simulator is None else simulator
-        with torch.no_grad():
-            for vector_data in self.iter_vectors(simulator):
-                yield self.vector_to_image(vector_data)
-
     def __iter__(self):
-        return self.stack_images(self.iter_images())
+        return chain(
+            *(self.stack_images(self.iter_images()) for _ in range(self.n_experiments))
+        )
 
     @staticmethod
-    def collate_fn(batch):
+    def collate_fn(batch: List[ImageData]):
         return collate_fn(batch)
 
 

@@ -7,14 +7,14 @@ from typing import List, Union
 import optuna
 import pytorch_lightning as pl
 import torch
-import wandb
 from optuna.integration.pytorch_lightning import PyTorchLightningPruningCallback
 from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
-from pytorch_lightning.loggers import Logger, TensorBoardLogger
+from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.loggers.wandb import WandbLogger
 from torch.utils.data import DataLoader
 
-from mtt.data import OnlineDataset, build_train_datapipes, collate_fn
+import wandb
+from mtt.data import OnlineDataset, build_train_datapipe, collate_fn
 from mtt.models import Conv2dCoder
 from mtt.simulator import Simulator
 
@@ -60,7 +60,7 @@ def main():
 
 def train(trainer: pl.Trainer, params: argparse.Namespace):
     torch.set_float32_matmul_precision("high")
-    train_dp, val_dp = build_train_datapipes(
+    train_dp = build_train_datapipe(
         "/nfs/general/mtt_data/train",
         max_files=params.files_per_epoch,
         map_location=params.map_location,
@@ -76,19 +76,25 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
             prefetch_factor=4,
             num_workers=min(torch.multiprocessing.cpu_count(), 4),
         )
-
     train_loader = DataLoader(train_dp, **dataloader_kwargs)
-    val_loader = DataLoader(val_dp, **dataloader_kwargs)
+
+    # for validation we will generate samples online, to avoid overfitting
+    val_dataset = get_online_dataset(
+        params,
+        n_experiments=100 // dataloader_kwargs.get("n_workers", 1),
+    )
+    val_loader = DataLoader(val_dataset, **dataloader_kwargs)
+
     model = Conv2dCoder(**vars(params))
     trainer.fit(model, train_loader, val_loader, ckpt_path=get_checkpoint_path())
-    test(trainer, params)
 
 
 def test(trainer: pl.Trainer, params: argparse.Namespace):
+    num_workers = min(torch.multiprocessing.cpu_count(), 4)
     test_loader = DataLoader(
-        get_test_dataset(params),
+        get_online_dataset(params, n_experiments=100 // num_workers),
         batch_size=1,
-        num_workers=min(torch.multiprocessing.cpu_count(), 4),
+        num_workers=num_workers,
         pin_memory=True,
         collate_fn=collate_fn,
     )
@@ -101,8 +107,11 @@ def study(params: argparse.Namespace):
     torch.set_float32_matmul_precision("high")
     study_name = "mtt-validconv"
     storage = os.environ["OPTUNA_STORAGE"]
+    # train for at least 5 epochs, this avoids high loss values adding noise to data
+    # I checked the code and optuna n_warmup_steps is the number of epochs
+    pruner = optuna.pruners.MedianPruner(n_warmup_steps=5)
     study = optuna.create_study(
-        study_name=study_name, storage=storage, load_if_exists=True
+        study_name=study_name, storage=storage, load_if_exists=True, pruner=pruner
     )
     study.optimize(partial(objective, default_params=params), n_trials=100)
 
@@ -114,8 +123,8 @@ def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace) -> 
         n_channels=trial.suggest_int("n_channels", 1, 256),
         n_channels_hidden=trial.suggest_int("n_channels_hidden", 1, 256),
         kernel_size=trial.suggest_int("kernel_size", 1, 11),
-        lr=trial.suggest_float("lr", 1e-8, 1, log=True),
-        weight_decay=trial.suggest_float("weight_decay", 0, 1, log=True),
+        lr=trial.suggest_float("lr", 1e-8, 1e-1, log=True),
+        weight_decay=trial.suggest_float("weight_decay", 1e-10, 1, log=True),
         batch_norm=True,
         activation="leaky_relu",
         optimizer="adamw",
@@ -138,7 +147,6 @@ def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace) -> 
             mode="min",
             save_top_k=1,
         ),
-        EarlyStopping(monitor="val/loss", patience=params.patience),
         PyTorchLightningPruningCallback(trial, monitor="val/loss"),
     ]
     trainer = pl.Trainer(
@@ -216,12 +224,13 @@ def get_checkpoint_path() -> Union[str, None]:
     return ckpt_path if os.path.exists(ckpt_path) else None
 
 
-def get_test_dataset(params: argparse.Namespace, n_steps=100):
+def get_online_dataset(params: argparse.Namespace, n_experiments=1, n_steps=100):
     return OnlineDataset(
         **dict(
             **vars(params),
             length=params.input_length,
             init_simulator=init_simulator,
+            n_experiments=n_experiments,
             n_steps=n_steps,
         )
     )
