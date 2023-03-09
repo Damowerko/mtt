@@ -98,25 +98,38 @@ class EncoderDecoder(pl.LightningModule):
         input_img, target_img, *_ = batch
         output_img = self(input_img)
         loss = self.loss(output_img, target_img)
-        self.log("train/loss", loss)
+        self.log("train/loss", loss, batch_size=input_img.shape[0])
         return loss
 
     def validation_step(self, batch, *_):
         batch = self.truncate_batch(batch)
         input_img, target_img, info = batch
         output_img = self(input_img)
+
         loss = self.loss(output_img, target_img)
-        self.log("val/loss", loss, prog_bar=True)
+        self.log("val/loss", loss, prog_bar=True, batch_size=input_img.shape[0])
+
         cardinality_mae = self.cardinality_errors(batch, output_img).abs().mean()
-        self.log("val/cardinality_mae", cardinality_mae, prog_bar=True)
+        self.log(
+            "val/cardinality_mae",
+            cardinality_mae,
+            prog_bar=True,
+            batch_size=input_img.shape[0],
+        )
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
     def test_step(self, batch, *_):
         batch = self.truncate_batch(batch)
         input_img, target_img, *_ = batch
         output_img = self(input_img)
-        self.log("test/loss", self.loss(output_img, target_img))
-        self.log("test/ospa", self.ospa(batch), prog_bar=True)
+        self.log(
+            "test/loss",
+            self.loss(output_img, target_img),
+            batch_size=input_img.shape[0],
+        )
+        self.log(
+            "test/ospa", self.ospa(batch), prog_bar=True, batch_size=input_img.shape[0]
+        )
         return input_img[0, -1], target_img[0, -1], output_img[0, -1]
 
     def test_epoch_end(self, outputs):
