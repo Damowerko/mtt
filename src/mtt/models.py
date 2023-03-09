@@ -1,6 +1,7 @@
 import os
 import subprocess
-from typing import Callable, Type
+from tempfile import TemporaryDirectory
+from typing import Callable, Tuple, Type
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -169,11 +170,8 @@ class EncoderDecoder(pl.LightningModule):
         return image.clamp_min(0).sum(dim=(-1, -2))
 
     def cardinality_errors(self, batch: StackedImageData, output_img: torch.Tensor):
-        cardinality_estimates = self.cardinality_from_image(output_img).cpu()
-        cardinality_truth = torch.zeros_like(cardinality_estimates)
-        for i in range(cardinality_estimates.shape[0]):
-            for j in range(cardinality_estimates.shape[1]):
-                cardinality_truth[i, j] = len(batch.info[i][j]["target_positions"])
+        cardinality_estimates = self.cardinality_from_image(output_img)
+        cardinality_truth = self.cardinality_from_image(batch.target_images)
         cardinality_errors = cardinality_estimates - cardinality_truth
         return cardinality_errors
 
@@ -326,10 +324,27 @@ class Conv2dCoder(EncoderDecoder):
         return x
 
 
-def load_model(model_cls: Type[EncoderDecoder], run_id: str) -> EncoderDecoder:
-    run_path = subprocess.run(
-        ["guild", "ls", run_id], stdout=subprocess.PIPE
-    ).stdout.decode("utf-8")
-    run_path = run_path.splitlines()[0][:-1]
-    checkpoint_path = os.path.join(run_path, "checkpoints/best.ckpt")
-    return model_cls.load_from_checkpoint(checkpoint_path).cuda()
+def load_model(uri: str) -> Tuple[Conv2dCoder, str]:
+    """Load a model from a uri.
+
+    Args:
+        uri (str): The uri of the model to load. By default this is a path to a file. If you want to use a wandb model, use the format wandb://<user>/<project>/<run_id>.
+    """
+    if uri.startswith("wandb://"):
+        import wandb
+
+        user, project, run_id = uri[len("wandb://") :].split("/")
+
+        # Download the model from wandb to temporary directory
+        with TemporaryDirectory() as tmpdir:
+            api = wandb.Api()
+            artifact = api.artifact(
+                f"{user}/{project}/model-{run_id}:best_k", type="model"
+            )
+            artifact.download(root=tmpdir)
+            model = Conv2dCoder.load_from_checkpoint(f"{tmpdir}/model.ckpt")
+            name = run_id
+    else:
+        model = Conv2dCoder.load_from_checkpoint(uri)
+        name = os.path.basename(uri).split(".")[0]
+    return model, name

@@ -82,29 +82,5 @@ def test_model(model: Conv2dCoder, data_path: str):
     return pd.DataFrame(result)
 
 
-def load_model(uri: str) -> Tuple[Conv2dCoder, str]:
-    """Load a model from a uri.
-
-    Args:
-        uri (str): The uri of the model to load. By default this is a path to a file. If you want to use a wandb model, use the format wandb://<user>/<project>/<run_id>.
-    """
-    if uri.startswith("wandb://"):
-        user, project, run_id = uri[len("wandb://") :].split("/")
-
-        # Download the model from wandb to temporary directory
-        with TemporaryDirectory() as tmpdir:
-            api = wandb.Api()
-            artifact = api.artifact(
-                f"{user}/{project}/model-{run_id}:best_k", type="model"
-            )
-            artifact.download(root=tmpdir)
-            model = Conv2dCoder.load_from_checkpoint(f"{tmpdir}/model.ckpt")
-            name = run_id
-    else:
-        model = Conv2dCoder.load_from_checkpoint(uri)
-        name = os.path.basename(uri).split(".")[0]
-    return model, name
-
-
 if __name__ == "__main__":
     main()
