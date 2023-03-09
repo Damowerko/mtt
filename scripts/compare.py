@@ -143,7 +143,7 @@ def run_cnn(simulation: List[VectorData]):
     predictions_cnn: List[npt.NDArray] = []
     mse_cnn: List[npt.NDArray] = []
     with torch.no_grad():
-        images = map(online_dataset.vectors_to_images, *zip(*simulation))
+        images = map(online_dataset.vector_to_image, *zip(*simulation))
         window = simulation[0].simulator.window_width
         filt_idx = -1
         for sensor_imgs, target_imgs, _ in online_dataset.stack_images(

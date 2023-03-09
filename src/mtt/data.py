@@ -1,6 +1,6 @@
 import os
-from collections import deque
 import pickle
+from collections import deque
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from functools import partial
 from glob import glob
@@ -158,42 +158,55 @@ def build_train_datapipes(
     return tuple(datapipes)
 
 
-def build_test_datapipe(data_path: str):
+def _transform_simulation(simulation_vectors: List[VectorData], **kwargs):
+    simulation_images = [vector_to_image(v, **kwargs) for v in simulation_vectors]
+    return collate_fn(simulation_images)
+
+
+def build_test_datapipe(data_path: str, vector_to_image_kwargs: Dict = {}):
     """
     Build a datapipe that loads in VectorData instead of StackedImageData.
     It will convert the VectorData into ImageData and then into StackedImageData.
     """
     with open(data_path, "rb") as f:
-        vectors: List[VectorData] = pickle.load(f)
+        simulations: List[List[VectorData]] = pickle.load(f)
     return (
-        dp.map.SequenceWrapper(vectors)
-        .map(lambda:)
+        dp.map.SequenceWrapper(simulations)
+        .to_iter_datapipe()
+        .set_length(len(simulations))
+        .sharding_filter()
+        .map(partial(_transform_simulation, **vector_to_image_kwargs))
         .map(partial(simulation_window, length=20))
-        .in_batch_shuffle()
-        .unbatch()
     )
 
-def vectors_to_images(data: VectorData, img_size: int, ) -> ImageData:
-        sensor_img = data.simulator.measurement_image(
-            self.img_size,
-            data.measurements,
-            data.clutter,
-            device=self.device,
-        )
-        position_img = data.simulator.position_image(
-            self.img_size,
-            self.sigma_position,
-            data.target_positions,
-            device=self.device,
-        )
-        info = dict(
-            target_positions=data.target_positions,
-            sensor_positions=data.sensor_positions,
-            measurements=data.measurements,
-            clutter=data.clutter,
-            window=data.simulator.window_width,
-        )
-        return ImageData(sensor_img, position_img, info)
+
+def vector_to_image(
+    data: VectorData,
+    img_size: int = 128,
+    sigma_position: float = 10.0,
+    device: str = "cpu",
+) -> ImageData:
+    sensor_img = data.simulator.measurement_image(
+        img_size,
+        data.measurements,
+        data.clutter,
+        device=device,
+    )
+    position_img = data.simulator.position_image(
+        img_size,
+        sigma_position,
+        data.target_positions,
+        device=device,
+    )
+    info = dict(
+        target_positions=data.target_positions,
+        sensor_positions=data.sensor_positions,
+        measurements=data.measurements,
+        clutter=data.clutter,
+        window=data.simulator.window_width,
+    )
+    return ImageData(sensor_img, position_img, info)
+
 
 class OnlineDataset(IterableDataset):
     def __init__(
@@ -250,27 +263,14 @@ class OnlineDataset(IterableDataset):
                 target_positions, sensor_positions, measurements, clutter, simulator
             )
 
-    def vectors_to_images(self, data: VectorData) -> ImageData:
-        sensor_img = data.simulator.measurement_image(
-            self.img_size,
-            data.measurements,
-            data.clutter,
+    def vector_to_image(self, data: VectorData) -> ImageData:
+        # use the vector_to_image module level method
+        return vector_to_image(
+            data,
+            img_size=self.img_size,
+            sigma_position=self.sigma_position,
             device=self.device,
         )
-        position_img = data.simulator.position_image(
-            self.img_size,
-            self.sigma_position,
-            data.target_positions,
-            device=self.device,
-        )
-        info = dict(
-            target_positions=data.target_positions,
-            sensor_positions=data.sensor_positions,
-            measurements=data.measurements,
-            clutter=data.clutter,
-            window=data.simulator.window_width,
-        )
-        return ImageData(sensor_img, position_img, info)
 
     def stack_images(self, images, queue=False):
         if queue:
@@ -300,7 +300,7 @@ class OnlineDataset(IterableDataset):
         simulator = self.init_simulator() if simulator is None else simulator
         with torch.no_grad():
             for vector_data in self.iter_vectors(simulator):
-                yield self.vectors_to_images(vector_data)
+                yield self.vector_to_image(vector_data)
 
     def __iter__(self):
         return self.stack_images(self.iter_images())
@@ -339,5 +339,5 @@ def generate_images_from_vectors(
     # the images are generated on the gpu in sequence
     # iterate over the futures as they complete
     for vectors in vector_generator:
-        images = [online_dataset.vectors_to_images(v) for v in vectors]
+        images = [online_dataset.vector_to_image(v) for v in vectors]
         yield online_dataset.collate_fn(images)
