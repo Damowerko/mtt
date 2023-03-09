@@ -4,11 +4,9 @@ from tempfile import TemporaryDirectory
 from typing import Dict, List, Tuple
 
 import pandas as pd
-import torch
-import wandb
-from torchdata.dataloader2 import DataLoader2, MultiProcessingReadingService
 from tqdm import tqdm
 
+import wandb
 from mtt.data import StackedImageData, build_test_datapipe
 from mtt.models import Conv2dCoder
 
@@ -54,21 +52,31 @@ def main():
 
 def test_model(model: Conv2dCoder, data_path: str):
     model = model.cuda()
-
-    datapipe = build_test_datapipe(data_path)
-    rs = MultiProcessingReadingService(num_workers=10)
-    dataloader = DataLoader2(datapipe, reading_service=rs)
-
+    datapipe = build_test_datapipe(
+        data_path, unbatch=False, vector_to_image_kwargs={"device": "cuda"}
+    )
     result: List[Dict] = []
-    for simulation_idx, simulation in enumerate(tqdm(dataloader, total=len(datapipe))):
+    for simulation_idx, simulation in enumerate(tqdm(datapipe, total=len(datapipe))):
         for step_idx, data in enumerate(simulation):
-            output = model(data.sensor_images.cuda())
-            mse = torch.mean((output - data.target_images.cuda()) ** 2).item()
+            assert isinstance(data, StackedImageData)
+
+            output = model.forward(data.sensor_images.cuda())
+            mse = model.loss(output, data.target_images[-1:].cuda()).item()
+
+            cardinality_target = model.cardinality_from_image(
+                data.target_images[-1:]
+            ).item()
+            cardinality_output = model.cardinality_from_image(output[-1:]).item()
+            cardinality_truth = len(data.info[-1]["target_positions"])
+
             result.append(
                 dict(
                     simulation_idx=simulation_idx,
                     step_idx=step_idx,
                     mse=mse,
+                    cardinality_target=cardinality_target,
+                    cardinality_output=cardinality_output,
+                    cardinality_truth=cardinality_truth,
                 )
             )
     return pd.DataFrame(result)

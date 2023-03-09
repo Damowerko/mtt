@@ -51,6 +51,12 @@ class StackedImageData(NamedTuple):
     info: List[Dict]
 
 
+class StackedImageBatch(NamedTuple):
+    sensor_images: torch.Tensor
+    target_images: torch.Tensor
+    info: List[List[Dict]]
+
+
 def load_simulation_file(
     file: Union[str, BinaryIO], map_location="cpu"
 ) -> StackedImageData:
@@ -93,8 +99,18 @@ def simulation_window(
     return samples
 
 
-def collate_fn(batch: List[ImageData]) -> StackedImageData:
-    sensor_imgs, position_imgs, infos = zip(*batch)
+def stack_images(data: Iterable[ImageData]) -> StackedImageData:
+    """
+    Stack the images from a list of StackedImageData into a single StackedImageBatch.
+    """
+    sensor_imgs, position_imgs, infos = zip(*data)
+    return StackedImageData(
+        torch.stack(sensor_imgs), torch.stack(position_imgs), list(infos)  # type: ignore
+    )
+
+
+def collate_fn(data: Iterable[StackedImageData]) -> StackedImageBatch:
+    sensor_imgs, position_imgs, infos = zip(*data)
     return StackedImageData(
         torch.stack(sensor_imgs), torch.stack(position_imgs), list(infos)  # type: ignore
     )
@@ -132,17 +148,19 @@ def build_train_datapipe(
 
 def _transform_simulation(simulation_vectors: List[VectorData], **kwargs):
     simulation_images = [vector_to_image(v, **kwargs) for v in simulation_vectors]
-    return collate_fn(simulation_images)
+    return stack_images(simulation_images)
 
 
-def build_test_datapipe(data_path: str, vector_to_image_kwargs: Dict = {}):
+def build_test_datapipe(
+    data_path: str, vector_to_image_kwargs: Dict = {}, unbatch=True
+):
     """
     Build a datapipe that loads in VectorData instead of StackedImageData.
     It will convert the VectorData into ImageData and then into StackedImageData.
     """
     with open(data_path, "rb") as f:
         simulations: List[List[VectorData]] = pickle.load(f)
-    return (
+    datapipe = (
         dp.map.SequenceWrapper(simulations)
         .to_iter_datapipe()
         .set_length(len(simulations))
@@ -150,6 +168,9 @@ def build_test_datapipe(data_path: str, vector_to_image_kwargs: Dict = {}):
         .map(partial(_transform_simulation, **vector_to_image_kwargs))
         .map(partial(simulation_window, length=20))
     )
+    if unbatch:
+        return datapipe.unbatch()
+    return datapipe
 
 
 def vector_to_image(
@@ -268,7 +289,7 @@ class OnlineDataset(IterableDataset):
                         list(infos),
                     )
         else:
-            sensor_imgs, position_imgs, infos = OnlineDataset.collate_fn(list(images))
+            sensor_imgs, position_imgs, infos = stack_images(list(images))
             for i in range(len(sensor_imgs) - self.length + 1):
                 yield (
                     sensor_imgs[i : i + self.length],
@@ -282,7 +303,7 @@ class OnlineDataset(IterableDataset):
         )
 
     @staticmethod
-    def collate_fn(batch: List[ImageData]):
+    def collate_fn(batch: Iterable[StackedImageData]):
         return collate_fn(batch)
 
 

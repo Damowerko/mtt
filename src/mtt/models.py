@@ -10,6 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_lightning.utilities.argparse import get_init_arguments_and_types
 
+from mtt.data import StackedImageData
 from mtt.peaks import find_peaks
 from mtt.utils import compute_ospa
 
@@ -87,11 +88,11 @@ class EncoderDecoder(pl.LightningModule):
         else:
             raise ValueError(f"Unknown loss {self.loss_fn}")
 
-    def truncate_batch(self, batch):
+    def truncate_batch(self, batch: StackedImageData):
         input_img, target_img, info = batch
         target_img = target_img[:, -self.output_shape[0] :]
         info = [_info[-self.output_shape[0] :] for _info in info]
-        return input_img, target_img, info
+        return StackedImageData(input_img, target_img, info)
 
     def training_step(self, batch, *_):
         batch = self.truncate_batch(batch)
@@ -164,14 +165,15 @@ class EncoderDecoder(pl.LightningModule):
             ospa_value += compute_ospa(X, Y, self.ospa_cutoff, p=2)
         return ospa_value / output_img.shape[0]
 
-    def cardinality_errors(self, batch, output_img):
-        input_img, _, info = batch
-        output_img = self(input_img)
-        cardinality_estimates = output_img.abs().sum(dim=(2, 3)).cpu()
+    def cardinality_from_image(self, image: torch.Tensor):
+        return image.clamp_min(0).sum(dim=(-1, -2))
+
+    def cardinality_errors(self, batch: StackedImageData, output_img: torch.Tensor):
+        cardinality_estimates = self.cardinality_from_image(output_img).cpu()
         cardinality_truth = torch.zeros_like(cardinality_estimates)
         for i in range(cardinality_estimates.shape[0]):
             for j in range(cardinality_estimates.shape[1]):
-                cardinality_truth[i, j] = len(info[i][j]["target_positions"])
+                cardinality_truth[i, j] = len(batch.info[i][j]["target_positions"])
         cardinality_errors = cardinality_estimates - cardinality_truth
         return cardinality_errors
 
@@ -306,20 +308,18 @@ class Conv2dCoder(EncoderDecoder):
         total_padding = [p * self.n_encoder for p in layer_padding]
         return super().loss(
             output_img[
-                :,
-                :,
+                ...,
                 total_padding[0] : -total_padding[0],
                 total_padding[1] : -total_padding[1],
             ],
             target_img[
-                :,
-                :,
+                ...,
                 total_padding[0] : -total_padding[0],
                 total_padding[1] : -total_padding[1],
             ],
         )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor):
         x = self.encoder(x)
         x = self.hidden(x)
         x = self.decoder(x)
