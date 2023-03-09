@@ -192,12 +192,28 @@ class Conv2dCoder(EncoderDecoder):
         dilation: int = 1,
         batch_norm: bool = True,
         activation: str = "leaky_relu",
+        loss_valid_convolution: bool = False,
         **kwargs,
     ):
+        """
+        Args:
+            n_encoder: number of encoder and decoder layers
+            n_hidden: number of hidden layers
+            n_channels: number of channels in the encoder layers
+            n_channels_hidden: number of channels in the hidden layers
+            kernel_size: kernel size of the convolutional layers
+            dilation: dilation of the convolutional layers
+            batch_norm: whether to use batch normalization
+            activation: activation function to use, either "relu" or "leaky_relu"
+            loss_valid_convolution: if true then compute loss only using parts of the output that did not use zero padding, similar to using padding="valid"
+        """
+
         super().__init__(**kwargs)
         self.save_hyperparameters()
+        self.loss_valid_convolution = loss_valid_convolution
+        self.n_encoder = n_encoder
 
-        padding = ((kernel_size - 1) // 2,) * 2
+        self.padding = ((kernel_size - 1) // 2,) * 2
         _kernel_size = (kernel_size, kernel_size)
         stride = (2, 2)
         _dilation = (dilation, dilation)
@@ -214,7 +230,7 @@ class Conv2dCoder(EncoderDecoder):
         for i in range(len(encoder_channels) - 1):
             encoder_shapes.append(
                 conv_output(
-                    encoder_shapes[-1], _kernel_size, stride, padding, _dilation
+                    encoder_shapes[-1], _kernel_size, stride, self.padding, _dilation
                 )
             )
             encoder_layers += [
@@ -224,7 +240,7 @@ class Conv2dCoder(EncoderDecoder):
                     encoder_channels[i + 1],
                     _kernel_size,
                     stride,
-                    padding,
+                    self.padding,
                     _dilation,
                 ),
                 _activation(),
@@ -240,7 +256,7 @@ class Conv2dCoder(EncoderDecoder):
             input_shape = np.asarray(decoder_shapes[i], dtype=np.int32)
             desired_shape = np.asarray(decoder_shapes[i + 1], dtype=np.int32)
             actual_shape = conv_transpose_output(
-                input_shape, kernel_size, stride, padding, dilation
+                input_shape, kernel_size, stride, self.padding, dilation
             )
             output_padding = desired_shape - actual_shape
 
@@ -251,7 +267,7 @@ class Conv2dCoder(EncoderDecoder):
                     decoder_channels[i + 1],
                     kernel_size,
                     stride,
-                    padding,
+                    self.padding,
                     tuple(output_padding),
                     dilation=dilation,
                 ),
@@ -270,11 +286,29 @@ class Conv2dCoder(EncoderDecoder):
             ]
         self.hidden = nn.Sequential(*hidden_layers)
 
+    def loss(self, output_img: torch.Tensor, target_img: torch.Tensor):
+        if not self.loss_valid_convolution:
+            return super().loss(output_img, target_img)
+        layer_padding = self.padding
+        total_padding = [p * self.n_encoder for p in layer_padding]
+        return super().loss(
+            output_img[
+                :,
+                :,
+                total_padding[0] : -total_padding[0],
+                total_padding[1] : -total_padding[1],
+            ],
+            target_img[
+                :,
+                :,
+                total_padding[0] : -total_padding[0],
+                total_padding[1] : -total_padding[1],
+            ],
+        )
+
     def forward(self, x):
         x = self.encoder(x)
-        # x = x.view(-1, self.embedding_size)
         x = self.hidden(x)
-        # x = x.view((-1, self.hparams.n_channels) + self.embedding_shape)
         x = self.decoder(x)
         return x
 
