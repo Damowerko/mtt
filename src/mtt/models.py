@@ -166,7 +166,7 @@ class EncoderDecoder(pl.LightningModule):
         return ospa_value / output_img.shape[0]
 
     def cardinality_from_image(self, image: torch.Tensor):
-        return image.clamp(min=0.0).sum(dim=(-1, -2))
+        return image.sum(dim=(-1, -2))
 
     def configure_optimizers(self):
         # pick optimizer
