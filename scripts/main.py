@@ -125,7 +125,7 @@ def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace) -> 
         kernel_size=trial.suggest_int("kernel_size", 1, 11),
         lr=trial.suggest_float("lr", 1e-8, 1e-1, log=True),
         weight_decay=trial.suggest_float("weight_decay", 1e-10, 1, log=True),
-        batch_norm=True,
+        batch_norm=trial.suggest_categorical("batch_norm", [True, False]),
         activation="leaky_relu",
         optimizer="adamw",
         loss_valid_convolution=True,

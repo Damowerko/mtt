@@ -205,7 +205,6 @@ class Conv2dCoder(EncoderDecoder):
         dilation: int = 1,
         batch_norm: bool = True,
         activation: str = "leaky_relu",
-        loss_valid_convolution: bool = False,
         **kwargs,
     ):
         """
@@ -218,12 +217,10 @@ class Conv2dCoder(EncoderDecoder):
             dilation: dilation of the convolutional layers
             batch_norm: whether to use batch normalization
             activation: activation function to use, either "relu" or "leaky_relu"
-            loss_valid_convolution: if true then compute loss only using parts of the output that did not use zero padding, similar to using padding="valid"
         """
 
         super().__init__(**kwargs)
         self.save_hyperparameters()
-        self.loss_valid_convolution = loss_valid_convolution
         self.n_encoder = n_encoder
 
         self.padding = ((kernel_size - 1) // 2,) * 2
@@ -298,24 +295,6 @@ class Conv2dCoder(EncoderDecoder):
                 _activation(),
             ]
         self.hidden = nn.Sequential(*hidden_layers)
-
-    def loss(self, output_img: torch.Tensor, target_img: torch.Tensor):
-        if not self.loss_valid_convolution:
-            return super().loss(output_img, target_img)
-        layer_padding = self.padding
-        total_padding = [p * self.n_encoder for p in layer_padding]
-        return super().loss(
-            output_img[
-                ...,
-                total_padding[0] : -total_padding[0],
-                total_padding[1] : -total_padding[1],
-            ],
-            target_img[
-                ...,
-                total_padding[0] : -total_padding[0],
-                total_padding[1] : -total_padding[1],
-            ],
-        )
 
     def forward(self, x: torch.Tensor):
         x = self.encoder(x)
