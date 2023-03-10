@@ -1,7 +1,8 @@
-from typing import NamedTuple, Tuple
+from typing import Iterable, NamedTuple, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
+import numpy.typing as npt
 import torch
 from sklearn.cluster import KMeans
 from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
@@ -30,6 +31,7 @@ def find_peaks(
     n_peaks=None,
     n_peaks_scale=1.0,
     center=(0, 0),
+    model="gmm",
 ) -> GMM:
     """
     Find peaks in the `image` by fitting a GMM.
@@ -38,6 +40,12 @@ def find_peaks(
     Args:
         image: (H, W) the image to find peaks in.
             We assume that the sum off al pixels is approximately the number of peaks.
+        width: the width in meters of the image.
+        n_peaks: the number of peaks to find.
+            If None, we assume that the number of peaks is approximately the sum of all pixels.
+        n_peaks_scale: the scale of the number of peaks to find.
+        center: the center of the image in meters.
+        model: the model to use to fit the peaks.
     Returns:
         means: (n_peaks, 2) the mean of each peak.
         covariances: (n_peaks, 2, 2) the covariance of each peak.
@@ -55,7 +63,12 @@ def find_peaks(
     samples = sample_image(image, width, center=center)
 
     # Fit gaussian mixture model to find peaks.
-    return fit_gmm(samples, n_components=n_components)
+    if model == "gmm":
+        return fit_gmm(samples, n_components=n_components)
+    elif model == "kmeans":
+        return fit_kmeans(samples, n_components=n_components, n_components_range=3)
+    else:
+        raise ValueError(f"Unknown model: {model}")
 
 
 def sample_image(img: np.ndarray, width: float, center=(0, 0)) -> np.ndarray:
@@ -67,6 +80,28 @@ def sample_image(img: np.ndarray, width: float, center=(0, 0)) -> np.ndarray:
     img += 1e-8
     idx = rng.choice(img.size, size=1000, p=img.reshape(-1) / img.sum(), shuffle=False)
     return XY.reshape(-1, 2)[idx]
+
+
+def fit_kmeans(samples: np.ndarray, n_components: int, n_components_range=0):
+    if n_components == 0:
+        return GMM(np.empty((0, 2)), np.empty((0, 2, 2)), np.empty(0))
+
+    best_means = np.zeros((0, 2))
+    best_itertia = np.inf
+    for n in range(
+        n_components - n_components_range, n_components + n_components_range + 1
+    ):
+        if n <= 0:
+            continue
+        knn = KMeans(n_clusters=n, n_init="auto")
+        knn.fit(samples)
+        if knn.inertia_ is not None and knn.inertia_ < best_itertia:
+            best_itertia = knn.inertia_
+            best_means = knn.cluster_centers_
+
+    weights = np.ones(best_means.shape[0]) / best_means.shape[0]
+    covariances = np.zeros((best_means.shape[0], 2, 2))
+    return GMM(best_means, covariances, weights)
 
 
 def fit_gmm(samples: np.ndarray, n_components: int) -> GMM:
@@ -82,11 +117,6 @@ def fit_gmm(samples: np.ndarray, n_components: int) -> GMM:
         return GMM(np.empty((0, 2)), np.empty((0, 2, 2)), np.empty(0))
     if n_components < 0:
         raise ValueError(f"n_components must be non-negative, got {n_components}.")
-
-    # knn = KMeans(n_clusters=n_components)
-    # knn.fit(samples)
-    # means = knn.cluster_centers_
-    # return means, None
 
     # fit kmeans
     gmm = GaussianMixture(
