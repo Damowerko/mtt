@@ -146,6 +146,7 @@ def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace) -> 
             mode="min",
             save_top_k=1,
         ),
+        EarlyStopping(monitor="val/loss", patience=10),
         PyTorchLightningPruningCallback(trial, monitor="val/loss"),
     ]
     trainer = pl.Trainer(
