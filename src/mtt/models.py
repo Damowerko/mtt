@@ -57,7 +57,7 @@ class EncoderDecoder(pl.LightningModule):
         img_size: int = 128,
         input_length: int = 20,
         output_length: int = 1,
-        loss_fn: str = "l2",
+        cardinality_weight=0.0,
         optimizer: str = "adamw",
         lr: float = 1e-3,
         weight_decay: float = 0,
@@ -68,7 +68,7 @@ class EncoderDecoder(pl.LightningModule):
         self.save_hyperparameters()
         self.input_shape = (input_length, img_size, img_size)
         self.output_shape = (output_length, img_size, img_size)
-        self.loss_fn = loss_fn
+        self.cardinality_weight = cardinality_weight
         self.optimizer = optimizer
         self.lr = lr
         self.weight_decay = weight_decay
@@ -82,12 +82,13 @@ class EncoderDecoder(pl.LightningModule):
             raise ValueError(
                 f"Output shape {output_img.shape} != target shape {target_img.shape}."
             )
-        if self.loss_fn == "l2":
-            return F.mse_loss(output_img, target_img)
-        elif self.loss_fn == "l1":
-            return F.l1_loss(output_img, target_img)
-        else:
-            raise ValueError(f"Unknown loss {self.loss_fn}")
+        image_mse = F.mse_loss(output_img, target_img)
+
+        cardinality_output = self.cardinality_from_image(output_img)
+        cardinality_target = self.cardinality_from_image(target_img)
+        cardinality_mse = F.mse_loss(cardinality_output, cardinality_target)
+        loss = image_mse + self.cardinality_weight * cardinality_mse
+        return loss, image_mse, cardinality_mse
 
     def truncate_batch(self, batch: StackedImageBatch):
         input_img, target_img, info = batch
@@ -95,44 +96,42 @@ class EncoderDecoder(pl.LightningModule):
         info = [_info[-self.output_shape[0] :] for _info in info]
         return StackedImageBatch(input_img, target_img, info)
 
-    def training_step(self, batch, *_):
+    def training_step(self, batch: StackedImageBatch, *_):
         batch = self.truncate_batch(batch)
-        input_img, target_img, *_ = batch
-        output_img = self(input_img)
-        loss = self.loss(output_img, target_img)
-        self.log("train/loss", loss, batch_size=input_img.shape[0])
+        batch_size = batch.sensor_images.shape[0]
+        output_img = self(batch.sensor_images)
+
+        loss, image_mse, cardinality_mse = self.loss(output_img, batch.target_images)
+        self.log("train/loss", loss, batch_size=batch_size)
+        self.log("train/image_mse", image_mse, batch_size=batch_size)
+        self.log("train/cardinality_mse", cardinality_mse, batch_size=batch_size)
         return loss
 
-    def validation_step(self, batch, *_):
+    def validation_step(self, batch: StackedImageBatch, *_):
         batch = self.truncate_batch(batch)
-        input_img, target_img, info = batch
-        output_img = self(input_img)
+        batch_size = batch.sensor_images.shape[0]
+        output_img = self(batch.sensor_images)
 
-        loss = self.loss(output_img, target_img)
-        self.log("val/loss", loss, prog_bar=True, batch_size=input_img.shape[0])
+        loss, image_mse, cardinality_mse = self.loss(output_img, batch.target_images)
+        self.log("val/loss", loss, batch_size=batch_size, prog_bar=True)
+        self.log("val/image_mse", image_mse, batch_size=batch_size)
+        self.log("val/cardinality_mse", cardinality_mse, batch_size=batch_size)
 
-        cardinality_mae = self.cardinality_errors(batch, output_img).abs().mean()
-        self.log(
-            "val/cardinality_mae",
-            cardinality_mae,
-            prog_bar=True,
-            batch_size=input_img.shape[0],
-        )
-        return input_img[0, -1], target_img[0, -1], output_img[0, -1]
+        return batch.sensor_images[0, -1], batch.target_images[0, -1], output_img[0, -1]
 
-    def test_step(self, batch, *_):
+    def test_step(self, batch: StackedImageBatch, *_):
         batch = self.truncate_batch(batch)
-        input_img, target_img, *_ = batch
-        output_img = self(input_img)
-        self.log(
-            "test/loss",
-            self.loss(output_img, target_img),
-            batch_size=input_img.shape[0],
-        )
-        self.log(
-            "test/ospa", self.ospa(batch), prog_bar=True, batch_size=input_img.shape[0]
-        )
-        return input_img[0, -1], target_img[0, -1], output_img[0, -1]
+        batch_size = batch.sensor_images.shape[0]
+        output_img = self(batch.sensor_images)
+
+        loss, image_mse, cardinality_mse = self.loss(output_img, batch.target_images)
+        self.log("test/loss", loss, batch_size=batch_size, prog_bar=True)
+        self.log("test/image_mse", image_mse, batch_size=batch_size)
+        self.log("test/cardinality_mse", cardinality_mse, batch_size=batch_size)
+
+        self.log("test/ospa", self.ospa(batch), prog_bar=True, batch_size=batch_size)
+
+        return batch.sensor_images[0, -1], batch.target_images[0, -1], output_img[0, -1]
 
     def test_epoch_end(self, outputs):
         n_rows = min(5, len(outputs))
@@ -168,12 +167,6 @@ class EncoderDecoder(pl.LightningModule):
 
     def cardinality_from_image(self, image: torch.Tensor):
         return image.clamp(min=0.0).sum(dim=(-1, -2))
-
-    def cardinality_errors(self, batch: StackedImageData, output_img: torch.Tensor):
-        cardinality_estimates = self.cardinality_from_image(output_img)
-        cardinality_truth = self.cardinality_from_image(batch.target_images)
-        cardinality_errors = cardinality_estimates - cardinality_truth
-        return cardinality_errors
 
     def configure_optimizers(self):
         # pick optimizer
