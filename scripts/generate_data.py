@@ -1,11 +1,13 @@
 import argparse
 import os
+import pickle
+from functools import partial
 
 import torch
 import tqdm
-import pickle
 
 from mtt.data import OnlineDataset, generate_vectors
+from mtt.simulator import Simulator
 
 
 def main(args):
@@ -14,7 +16,13 @@ def main(args):
     if len(os.listdir(args.out_dir)) > 0:
         raise ValueError(f"Output directory {args.out_dir} is not empty.")
 
-    online_dataset = OnlineDataset(n_steps=119, length=20, img_size=128, device="cuda")
+    online_dataset = OnlineDataset(
+        n_steps=119,
+        length=20,
+        img_size=128 * args.scale,
+        device="cuda",
+        init_simulator=partial(Simulator, window_width=1000 * args.scale),
+    )
     # start a generator that will yeild a simulation with 119 steps (see data.py)
     vectors_list = list(
         generate_vectors(
