@@ -28,8 +28,6 @@ from torch.utils.data import IterableDataset, IterDataPipe
 
 from mtt.simulator import Simulator
 
-rng = np.random.default_rng()
-
 
 class VectorData(NamedTuple):
     target_positions: npt.NDArray[np.floating]
@@ -77,6 +75,7 @@ def simulation_window(
         length: the length of the sequences
         indices: the indices of the windows to return, if "all" return all windows, if "random" return one random window
     """
+    rng = np.random.default_rng()
     sensor_imgs, position_imgs, infos = data
     n_samples = len(sensor_imgs) - length + 1
 

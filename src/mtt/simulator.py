@@ -8,8 +8,6 @@ from mtt.sensor import Sensor, measurement_image
 from mtt.target import Target
 from mtt.utils import to_cartesian
 
-rng = np.random.default_rng()
-
 
 class Simulator:
     def __init__(
@@ -28,6 +26,7 @@ class Simulator:
         noise_range: float = 10.0,
         noise_bearing: float = 0.035,
         dt: float = 1.0,
+        seed: Optional[int] = None,
     ):
         """
         Args:
@@ -46,6 +45,7 @@ class Simulator:
             noise_bearing: The standard deviation of the bearing measurement noise.
             dt: The time step.
         """
+        self.rng = np.random.default_rng(seed)
         self.window_width = window_width
         self.window_area = window_width**2 / 1000**2
         self.simulation_width = (
@@ -69,23 +69,23 @@ class Simulator:
         # make sure there is at least one target? TODO: check this
         self.targets = [
             self.init_target()
-            for i in range(1 + rng.poisson(n_targets * self.simulation_area - 1))
+            for i in range(1 + self.rng.poisson(n_targets * self.simulation_area - 1))
         ]
         # make sure there is at least one sensor? TODO: check this
         self.sensors = [
             self.init_sensor(sensor_range, noise_range, noise_bearing)
-            for _ in range(1 + rng.poisson(n_sensors * self.simulation_area - 1))
+            for _ in range(1 + self.rng.poisson(n_sensors * self.simulation_area - 1))
         ]
 
     def init_target(self) -> Target:
         initial_state = np.concatenate(
             (
-                rng.uniform(
+                self.rng.uniform(
                     low=-self.simulation_width / 2,
                     high=self.simulation_width / 2,
                     size=(2, 1),
                 ),
-                rng.normal(
+                self.rng.normal(
                     scale=self.sigma_initial_state,
                     size=(2, len(self.sigma_initial_state)),
                 ),
@@ -98,7 +98,7 @@ class Simulator:
         self, range_max: float, noise_range: float, noise_bearing: float
     ) -> Sensor:
         return Sensor(
-            position=rng.uniform(
+            position=self.rng.uniform(
                 low=-self.simulation_width / 2,
                 high=self.simulation_width / 2,
                 size=2,
@@ -133,13 +133,13 @@ class Simulator:
             target.update(self.dt)
 
         # Target survival
-        survival = rng.uniform(size=len(self.targets)) < self.p_survival
+        survival = self.rng.uniform(size=len(self.targets)) < self.p_survival
         self.targets = [
             target for target, alive in zip(self.targets, survival) if alive
         ]
 
         # Target birth
-        n_birth = rng.poisson(self.p_birth * self.simulation_area)
+        n_birth = self.rng.poisson(self.p_birth * self.simulation_area)
         self.targets += [self.init_target() for _ in range(n_birth)]
 
     def measurements(self) -> List[npt.NDArray[np.floating]]:
@@ -152,13 +152,13 @@ class Simulator:
         clutter = []
         for sensor in self.sensors:
             # clutter rate is per one sensor
-            n_clutter = rng.poisson(self.n_clutter)
+            n_clutter = self.rng.poisson(self.n_clutter)
 
             # measurements in polar coordinates
             rtheta = np.stack(
                 (
-                    rng.uniform(low=0, high=sensor.range_max, size=n_clutter),
-                    rng.uniform(low=0, high=2 * np.pi, size=n_clutter),
+                    self.rng.uniform(low=0, high=sensor.range_max, size=n_clutter),
+                    self.rng.uniform(low=0, high=2 * np.pi, size=n_clutter),
                 ),
                 axis=1,
             )

@@ -1,12 +1,11 @@
 import numpy as np
 
-rng = np.random.default_rng()
-
 
 class CAModel:
     def __init__(self, initial_state, sigma):
         self.state = initial_state
         self.sigma = sigma
+        self.rng = np.random.default_rng()
 
     @property
     def state(self):
@@ -17,7 +16,7 @@ class CAModel:
         self.x, self.v, self.a = value
 
     def update(self, time_step=1.0):
-        eta = rng.normal(0, self.sigma)
+        eta = self.rng.normal(0, self.sigma)
         self.x = self.x + self.v * time_step + (self.a + eta) * time_step**2 / 2
         self.v = self.v + (self.a + eta) * time_step
         self.a = self.a + eta
@@ -27,6 +26,7 @@ class CVModel:
     def __init__(self, initial_state, sigma):
         self.state = initial_state
         self.sigma = sigma
+        self.rng = np.random.default_rng()
 
     @property
     def state(self):
@@ -37,7 +37,7 @@ class CVModel:
         self.x, self.v = value
 
     def update(self, time_step=1.0):
-        a = rng.normal(0, self.sigma)
+        a = self.rng.normal(0, self.sigma)
         self.x = self.x + self.v * time_step + a * time_step**2 / 2
         self.v = self.v + a * time_step
 

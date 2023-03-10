@@ -6,8 +6,6 @@ from numpy.typing import ArrayLike, NDArray
 
 from mtt.utils import to_cartesian, to_polar, to_polar_torch
 
-rng = np.random.default_rng()
-
 
 class Sensor:
     def __init__(
@@ -29,6 +27,7 @@ class Sensor:
         self.noise = np.asarray(noise).reshape(2)
         self.p_detection = p_detection
         self.range_max = range_max
+        self.rng = np.random.default_rng()
 
     def measure(self, target_positions: ArrayLike):
         """
@@ -41,7 +40,7 @@ class Sensor:
             (N,2) range and bearing measurements.
         """
         target_positions = np.asarray(target_positions, np.float64)
-        detected = rng.uniform(size=len(target_positions)) < self.p_detection
+        detected = self.rng.uniform(size=len(target_positions)) < self.p_detection
         detected &= (
             np.linalg.norm(target_positions - self.position[None, :], axis=1)
             <= self.range_max
@@ -49,7 +48,7 @@ class Sensor:
         target_positions = target_positions[detected]
 
         measurements = to_polar(target_positions - self.position[None, :])
-        measurements += rng.normal(0, self.noise, size=measurements.shape)
+        measurements += self.rng.normal(0, self.noise, size=measurements.shape)
         return to_cartesian(measurements) + self.position[None, :]
 
     def measurement_density(
