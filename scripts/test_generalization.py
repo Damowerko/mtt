@@ -6,7 +6,6 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-import wandb
 from mtt.data import StackedImageData, build_test_datapipe, collate_fn
 from mtt.models import Conv2dCoder, load_model
 from mtt.peaks import find_peaks
@@ -38,7 +37,7 @@ def main():
 
     model, name = load_model(args.model_uri)
     results: List[pd.DataFrame] = []
-    for scale in range(1, 5):
+    for scale in range(1, 2):
         print(f"Testing model on {scale}km")
         result = test_model(
             model,
