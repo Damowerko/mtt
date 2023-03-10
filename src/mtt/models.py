@@ -57,7 +57,7 @@ class EncoderDecoder(pl.LightningModule):
         img_size: int = 128,
         input_length: int = 20,
         output_length: int = 1,
-        cardinality_weight=0.0,
+        cardinality_weight: float = 0.0,
         optimizer: str = "adamw",
         lr: float = 1e-3,
         weight_decay: float = 0,

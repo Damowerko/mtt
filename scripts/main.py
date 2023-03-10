@@ -111,21 +111,31 @@ def study(params: argparse.Namespace):
         min_resource=5, max_resource=200, reduction_factor=3
     )
     study = optuna.create_study(
-        study_name=study_name, storage=storage, load_if_exists=True, pruner=pruner
+        study_name=study_name,
+        storage=storage,
+        load_if_exists=True,
+        pruner=pruner,
+        directions=["minimize", "minimize"],
     )
-    study.optimize(partial(objective, default_params=params), n_trials=1)
+    study.optimize(
+        partial(objective, default_params=params),
+        n_trials=1,
+    )
 
 
-def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace) -> float:
+def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace):
     study_params = dict(
         n_encoder=trial.suggest_int("n_encoder", 2, 6),
         n_hidden=trial.suggest_int("n_hidden", 1, 10),
         n_channels=trial.suggest_int("n_channels", 32, 256),
-        n_channels_hidden=trial.suggest_int("n_channels_hidden", 32, 256),
+        n_channels_hidden=trial.suggest_int("n_channels_hidden", 32, 2048),
         kernel_size=trial.suggest_int("kernel_size", 3, 11),
         lr=trial.suggest_float("lr", 1e-8, 1e-1, log=True),
         weight_decay=trial.suggest_float("weight_decay", 1e-10, 1, log=True),
         batch_norm=trial.suggest_categorical("batch_norm", [True, False]),
+        cardinality_weight=trial.suggest_float(
+            "cardinality_weight", 1e-10, 1, log=True
+        ),
         activation="leaky_relu",
         optimizer="adamw",
     )
@@ -162,7 +172,10 @@ def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace) -> 
     # finish up
     trial.set_user_attr("wandb_id", logger.experiment.id)
     wandb.finish()
-    return trainer.callback_metrics["val/loss"].item()
+    return (
+        trainer.callback_metrics["val/image_mse"].item(),
+        trainer.callback_metrics["val/cardinality_mse"].item(),
+    )
 
 
 def init_simulator():
