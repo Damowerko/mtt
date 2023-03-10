@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_lightning.utilities.argparse import get_init_arguments_and_types
 
-from mtt.data import StackedImageData
+from mtt.data import StackedImageBatch, StackedImageData
 from mtt.peaks import find_peaks
 from mtt.utils import compute_ospa
 
@@ -89,11 +89,11 @@ class EncoderDecoder(pl.LightningModule):
         else:
             raise ValueError(f"Unknown loss {self.loss_fn}")
 
-    def truncate_batch(self, batch: StackedImageData):
+    def truncate_batch(self, batch: StackedImageBatch):
         input_img, target_img, info = batch
         target_img = target_img[:, -self.output_shape[0] :]
         info = [_info[-self.output_shape[0] :] for _info in info]
-        return StackedImageData(input_img, target_img, info)
+        return StackedImageBatch(input_img, target_img, info)
 
     def training_step(self, batch, *_):
         batch = self.truncate_batch(batch)
@@ -167,7 +167,7 @@ class EncoderDecoder(pl.LightningModule):
         return ospa_value / output_img.shape[0]
 
     def cardinality_from_image(self, image: torch.Tensor):
-        return image.clamp_min(0).sum(dim=(-1, -2))
+        return image.clamp(min=0.0).sum(dim=(-1, -2))
 
     def cardinality_errors(self, batch: StackedImageData, output_img: torch.Tensor):
         cardinality_estimates = self.cardinality_from_image(output_img)
