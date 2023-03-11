@@ -6,7 +6,7 @@ from functools import partial
 import torch
 import tqdm
 
-from mtt.data import OnlineDataset, generate_vectors
+from mtt.data import OnlineDataset, generate_vectors, stack_images
 from mtt.simulator import Simulator
 
 
@@ -42,8 +42,9 @@ def main(args):
         desc="Generating images",
         unit="image",
     ):
+        images = [online_dataset.vector_to_image(v) for v in simulation]
         with open(os.path.join(args.out_dir, f"{i}.pt"), "wb") as f:
-            torch.save(simulation, f)
+            torch.save(stack_images(images), f)
 
 
 if __name__ == "__main__":

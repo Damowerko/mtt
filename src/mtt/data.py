@@ -320,20 +320,3 @@ def generate_vectors(
             futures += [e.submit(_generate_vectors, online_dataset)]
     for f in as_completed(futures):
         yield f.result()
-
-
-def generate_images_from_vectors(
-    online_dataset: OnlineDataset,
-    n_simulations=10,
-    vector_generator: Optional[Iterable[List[VectorData]]] = None,
-) -> Iterable[StackedImageData]:
-    """
-    A data generator that can be used to generate data in parallel.
-    """
-    if vector_generator is None:
-        vector_generator = generate_vectors(online_dataset, n_simulations)
-    # the images are generated on the gpu in sequence
-    # iterate over the futures as they complete
-    for vectors in vector_generator:
-        images = [online_dataset.vector_to_image(v) for v in vectors]
-        yield online_dataset.collate_fn(images)
