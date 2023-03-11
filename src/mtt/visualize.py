@@ -19,7 +19,7 @@ def plot_mtt(sensor_imgs, position_imgs, info):
     measurements = np.concatenate(info[-1]["measurements"])
     clutter = np.concatenate(info[-1]["clutter"])
 
-    width = 1000
+    width = info[-1]["window"]
     extent = (-width / 2, width / 2, -width / 2, width / 2)
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))

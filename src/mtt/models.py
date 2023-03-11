@@ -86,6 +86,7 @@ class EncoderDecoder(pl.LightningModule):
 
         cardinality_output = self.cardinality_from_image(output_img)
         cardinality_target = self.cardinality_from_image(target_img)
+        # divide by image size to normalize, should be same magnitude as image_mse
         cardinality_mse = F.mse_loss(cardinality_output, cardinality_target)
         loss = image_mse + self.cardinality_weight * cardinality_mse
         return loss, image_mse, cardinality_mse
