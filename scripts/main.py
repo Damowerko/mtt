@@ -7,13 +7,13 @@ from typing import List, Union
 import optuna
 import pytorch_lightning as pl
 import torch
+import wandb
 from optuna.integration.pytorch_lightning import PyTorchLightningPruningCallback
 from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.loggers.wandb import WandbLogger
 from torch.utils.data import DataLoader
 
-import wandb
 from mtt.data import OnlineDataset, build_train_datapipe, collate_fn
 from mtt.models import Conv2dCoder
 from mtt.simulator import Simulator
@@ -133,9 +133,7 @@ def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace):
         lr=trial.suggest_float("lr", 1e-8, 1e-1, log=True),
         weight_decay=trial.suggest_float("weight_decay", 1e-10, 1, log=True),
         batch_norm=trial.suggest_categorical("batch_norm", [True, False]),
-        cardinality_weight=trial.suggest_float(
-            "cardinality_weight", 1e-10, 1, log=True
-        ),
+        cardinality_weight=0.01,
         activation="leaky_relu",
         optimizer="adamw",
     )
@@ -172,10 +170,7 @@ def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace):
     # finish up
     trial.set_user_attr("wandb_id", logger.experiment.id)
     wandb.finish()
-    return (
-        trainer.callback_metrics["val/image_mse"].item(),
-        trainer.callback_metrics["val/cardinality_mse"].item(),
-    )
+    return trainer.callback_metrics["val/loss"].item()
 
 
 def init_simulator():
