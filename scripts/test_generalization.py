@@ -74,15 +74,15 @@ def test_model(model: Conv2dCoder, data_path: str, scale: int = 1):
             cardinality_output = model.cardinality_from_image(output).item()
             cardinality_truth = len(data.info[-1]["target_positions"])
 
-            # targets_truth = data.info[-1]["target_positions"]
+            targets_truth = data.info[-1]["target_positions"]
             # targets_gmm = find_peaks(
             #     output[-1].cpu().numpy(), width=data.info[-1]["window"], model="gmm"
             # ).means
-            # targets_kmeans = find_peaks(
-            #     output[-1].cpu().numpy(), width=data.info[-1]["window"], model="kmeans"
-            # ).means
+            targets_kmeans = find_peaks(
+                output[-1].cpu().numpy(), width=data.info[-1]["window"], model="kmeans"
+            ).means
             # ospa_gmm = compute_ospa(targets_truth, targets_gmm, 500)
-            # ospa_kmeans = compute_ospa(targets_truth, targets_kmeans, 500)
+            ospa_kmeans = compute_ospa(targets_truth, targets_kmeans, 500)
 
             result.append(
                 dict(
@@ -93,7 +93,7 @@ def test_model(model: Conv2dCoder, data_path: str, scale: int = 1):
                     cardinality_output=cardinality_output,
                     cardinality_truth=cardinality_truth,
                     # ospa_gmm=ospa_gmm,
-                    # ospa_kmeans=ospa_kmeans,
+                    ospa_kmeans=ospa_kmeans,
                 )
             )
     return pd.DataFrame(result)
