@@ -115,7 +115,7 @@ def study(params: argparse.Namespace):
         storage=storage,
         load_if_exists=True,
         pruner=pruner,
-        directions=["minimize", "minimize"],
+        directions=["minimize"],
     )
     study.optimize(
         partial(objective, default_params=params),
