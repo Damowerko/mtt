@@ -50,8 +50,8 @@ def find_peaks(
         means: (n_peaks, 2) the mean of each peak.
         covariances: (n_peaks, 2, 2) the covariance of each peak.
     """
-    # set negative pixels to zero
-    image = np.maximum(image, 0)
+    # Sample image based on pixel values.
+    samples = sample_image(image, width, center=center)
 
     if n_peaks is None:
         # assuming number of peaks is approximately the sum of all pixels
@@ -59,14 +59,11 @@ def find_peaks(
     else:
         n_components = n_peaks
 
-    # Sample image based on pixel values.
-    samples = sample_image(image, width, center=center)
-
     # Fit gaussian mixture model to find peaks.
     if model == "gmm":
         return fit_gmm(samples, n_components=n_components)
     elif model == "kmeans":
-        return fit_kmeans(samples, n_components=n_components, n_components_range=3)
+        return fit_kmeans(samples, n_components=n_components, n_components_range=1)
     else:
         raise ValueError(f"Unknown model: {model}")
 
@@ -75,6 +72,7 @@ def sample_image(img: np.ndarray, width: float, center=(0, 0)) -> np.ndarray:
     """
     Sample `img` based on pixel values.
     """
+    img = np.maximum(img, 0)
     XY = make_grid(img.shape, width, center=center)
     # add epsilon to avoid division by zero
     img += 1e-8
