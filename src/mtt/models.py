@@ -198,7 +198,7 @@ class Conv2dCoder(EncoderDecoder):
         kernel_size: int = 9,
         batch_norm: bool = True,
         activation: str = "leaky_relu",
-        upsampling: str = "nearest",
+        upsampling: str = "transpose",
         **kwargs,
     ):
         """
