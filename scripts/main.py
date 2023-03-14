@@ -7,13 +7,13 @@ from typing import List, Union
 import optuna
 import pytorch_lightning as pl
 import torch
-import wandb
 from optuna.integration.pytorch_lightning import PyTorchLightningPruningCallback
 from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.loggers.wandb import WandbLogger
 from torch.utils.data import DataLoader
 
+import wandb
 from mtt.data import OnlineDataset, build_train_datapipe, collate_fn
 from mtt.models import Conv2dCoder
 from mtt.simulator import Simulator
