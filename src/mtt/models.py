@@ -260,7 +260,7 @@ class Conv2dCoder(EncoderDecoder):
                         encoder_channels[i + 1],
                         _kernel_size,
                         1,
-                        padding,
+                        "same",
                         _dilation,
                     ),
                     nn.MaxPool2d(_stride),
@@ -304,7 +304,7 @@ class Conv2dCoder(EncoderDecoder):
                         decoder_channels[i + 1],
                         kernel_size,
                         1,
-                        padding,
+                        "same",
                         dilation,
                     ),
                 ]
