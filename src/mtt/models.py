@@ -196,9 +196,9 @@ class Conv2dCoder(EncoderDecoder):
         n_channels: int = 64,
         n_channels_hidden: int = 128,
         kernel_size: int = 9,
-        dilation: int = 1,
         batch_norm: bool = True,
         activation: str = "leaky_relu",
+        upsampling: str = "nearest",
         **kwargs,
     ):
         """
@@ -217,9 +217,11 @@ class Conv2dCoder(EncoderDecoder):
         self.save_hyperparameters()
         self.n_encoder = n_encoder
 
-        self.padding = ((kernel_size - 1) // 2,) * 2
+        padding = ((kernel_size - 1) // 2,) * 2
         _kernel_size = (kernel_size, kernel_size)
-        stride = (2, 2)
+        stride = 2
+        _stride = (stride, stride)
+        dilation = 1
         _dilation = (dilation, dilation)
         _activation: Callable[..., nn.Module] = {
             "relu": lambda: nn.ReLU(inplace=True),
@@ -234,21 +236,35 @@ class Conv2dCoder(EncoderDecoder):
         for i in range(len(encoder_channels) - 1):
             encoder_shapes.append(
                 conv_output(
-                    encoder_shapes[-1], _kernel_size, stride, self.padding, _dilation
+                    encoder_shapes[-1], _kernel_size, _stride, padding, _dilation
                 )
             )
-            encoder_layers += [
-                (nn.BatchNorm2d(encoder_channels[i]) if batch_norm else nn.Identity()),
-                nn.Conv2d(
-                    encoder_channels[i],
-                    encoder_channels[i + 1],
-                    _kernel_size,
-                    stride,
-                    self.padding,
-                    _dilation,
-                ),
-                _activation(),
-            ]
+            if batch_norm:
+                encoder_layers += [nn.BatchNorm2d(encoder_channels[i])]
+            if upsampling == "transpose":
+                encoder_layers += [
+                    nn.Conv2d(
+                        encoder_channels[i],
+                        encoder_channels[i + 1],
+                        _kernel_size,
+                        _stride,
+                        padding,
+                        _dilation,
+                    )
+                ]
+            else:
+                encoder_layers += [
+                    nn.Conv2d(
+                        encoder_channels[i],
+                        encoder_channels[i + 1],
+                        _kernel_size,
+                        1,
+                        padding,
+                        _dilation,
+                    ),
+                    nn.MaxPool2d(_stride),
+                ]
+            encoder_layers += [_activation()]
         self.encoder = nn.Sequential(*encoder_layers)
 
         # the decoder layers are analogous to the encoder layers but in reverse
@@ -256,27 +272,44 @@ class Conv2dCoder(EncoderDecoder):
         decoder_channels = [n_channels] * n_encoder + [self.output_shape[0]]
         decoder_layers = []
         for i in range(len(decoder_channels) - 1):
-            # specify output_padding to resolve output shape ambiguity when stride > 1
-            input_shape = np.asarray(decoder_shapes[i], dtype=np.int32)
-            desired_shape = np.asarray(decoder_shapes[i + 1], dtype=np.int32)
-            actual_shape = conv_transpose_output(
-                input_shape, kernel_size, stride, self.padding, dilation
-            )
-            output_padding = desired_shape - actual_shape
-
-            decoder_layers += [
-                (nn.BatchNorm2d(decoder_channels[i]) if batch_norm else nn.Identity()),
-                nn.ConvTranspose2d(
-                    decoder_channels[i],
-                    decoder_channels[i + 1],
-                    kernel_size,
-                    stride,
-                    self.padding,
-                    tuple(output_padding),
-                    dilation=dilation,
-                ),
-                _activation(),
-            ]
+            if batch_norm:
+                decoder_layers += [nn.BatchNorm2d(decoder_channels[i])]
+            if upsampling == "transpose":
+                # specify output_padding to resolve output shape ambiguity when stride > 1
+                input_shape = np.asarray(decoder_shapes[i], dtype=np.int32)
+                desired_shape = np.asarray(decoder_shapes[i + 1], dtype=np.int32)
+                actual_shape = conv_transpose_output(
+                    input_shape, kernel_size, _stride, padding, dilation
+                )
+                output_padding = desired_shape - actual_shape
+                decoder_layers += [
+                    nn.ConvTranspose2d(
+                        decoder_channels[i],
+                        decoder_channels[i + 1],
+                        kernel_size,
+                        _stride,
+                        padding,
+                        tuple(output_padding),
+                        dilation=dilation,
+                    ),
+                ]
+            elif upsampling in ["nearest", "bilinear"]:
+                # Upsampling followed by convolution might avoid checkerboard artifacts
+                # Reference: https://distill.pub/2016/deconv-checkerboard/
+                decoder_layers += [
+                    nn.Upsample(scale_factor=_stride, mode=upsampling),
+                    nn.Conv2d(
+                        decoder_channels[i],
+                        decoder_channels[i + 1],
+                        kernel_size,
+                        1,
+                        padding,
+                        dilation,
+                    ),
+                ]
+            else:
+                raise ValueError(f"Unknown upsampling method {upsampling}")
+            decoder_layers += [_activation()]
         self.decoder = nn.Sequential(*decoder_layers)
 
         # initialize the hidden layers
