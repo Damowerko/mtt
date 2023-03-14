@@ -211,6 +211,7 @@ class Conv2dCoder(EncoderDecoder):
             dilation: dilation of the convolutional layers
             batch_norm: whether to use batch normalization
             activation: activation function to use, either "relu" or "leaky_relu"
+            upsampling: upsampling method to use, either "transpose" or "nearest"
         """
 
         super().__init__(**kwargs)

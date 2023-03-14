@@ -133,6 +133,7 @@ def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace):
         lr=trial.suggest_float("lr", 1e-8, 1e-1, log=True),
         weight_decay=trial.suggest_float("weight_decay", 1e-10, 1, log=True),
         batch_norm=trial.suggest_categorical("batch_norm", [True, False]),
+        upsampling=trial.suggest_categorical("upsampling", ["transpose", "nearest"]),
         cardinality_weight=0.00001,
         activation="leaky_relu",
         optimizer="adamw",
