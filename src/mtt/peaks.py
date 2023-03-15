@@ -7,6 +7,7 @@ import torch
 from sklearn.cluster import KMeans
 from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
 
+from mtt.lloyd import compute_peaks
 from mtt.utils import gaussian, make_grid
 
 rng = np.random.default_rng()
@@ -31,7 +32,7 @@ def find_peaks(
     n_peaks=None,
     n_peaks_scale=1.0,
     center=(0, 0),
-    model="gmm",
+    method="gmm",
 ) -> GMM:
     """
     Find peaks in the `image` by fitting a GMM.
@@ -63,12 +64,22 @@ def find_peaks(
     samples = sample_image(image, width, center=center)
 
     # Fit gaussian mixture model to find peaks.
-    if model == "gmm":
+    if method == "gmm":
         return fit_gmm(samples, n_components=n_components)
-    elif model == "kmeans":
-        return fit_kmeans(samples, n_components=n_components, n_components_range=1)
+    elif method == "kmeans":
+        return fit_kmeans(samples, n_components=n_components, n_components_range=3)
+    elif method == "lloyd":
+        peaks, _ = compute_peaks(
+            image.T, threshold_val=1e-4, blur_sigma=1, region_size=7
+        )
+        peaks = (peaks / 128 - 0.5) * width
+        return GMM(
+            peaks,
+            np.zeros((peaks.shape[0], 2, 2)),
+            np.ones(peaks.shape[0]) / peaks.shape[0],
+        )
     else:
-        raise ValueError(f"Unknown model: {model}")
+        raise ValueError(f"Unknown model: {method}")
 
 
 def sample_image(img: np.ndarray, width: float, center=(0, 0)) -> np.ndarray:
@@ -87,6 +98,7 @@ def fit_kmeans(samples: np.ndarray, n_components: int, n_components_range=0):
         return GMM(np.empty((0, 2)), np.empty((0, 2, 2)), np.empty(0))
 
     best_means = np.zeros((0, 2))
+    best_labels = np.zeros(samples.shape[0], dtype=int)
     best_itertia = np.inf
     for n in range(
         n_components - n_components_range, n_components + n_components_range + 1
@@ -98,8 +110,12 @@ def fit_kmeans(samples: np.ndarray, n_components: int, n_components_range=0):
         if knn.inertia_ is not None and knn.inertia_ < best_itertia:
             best_itertia = knn.inertia_
             best_means = knn.cluster_centers_
+            best_labels = knn.labels_
 
-    weights = np.ones(best_means.shape[0]) / best_means.shape[0]
+    # compute weight use the relative number of points in each cluster
+    weights = np.bincount(best_labels) / best_labels.size
+    # weights = np.ones(best_means.shape[0]) / best_means.shape[0]
+
     covariances = np.zeros((best_means.shape[0], 2, 2))
     return GMM(best_means, covariances, weights)
 
@@ -117,16 +133,24 @@ def fit_gmm(samples: np.ndarray, n_components: int) -> GMM:
         return GMM(np.empty((0, 2)), np.empty((0, 2, 2)), np.empty(0))
     if n_components < 0:
         raise ValueError(f"n_components must be non-negative, got {n_components}.")
-
-    # fit kmeans
-    gmm = GaussianMixture(
+    gmm_sklearn = GaussianMixture(
         n_components=n_components,
         n_init=10,
     )
-    gmm.fit(samples)
-    # get only the large weights
-    idx = gmm.weights_ > 0.5 / n_components
-    return GMM(gmm.means_[idx], gmm.covariances_[idx], gmm.weights_[idx])
+    gmm_sklearn.fit(samples)
+    gmm = GMM(gmm_sklearn.means_, gmm_sklearn.covariances_, gmm_sklearn.weights_)
+    return reweigh(gmm, n_components)
+
+
+def reweigh(gmm: GMM, n_components):
+    _idx = []
+    # if weights more that 1.5 then these are two targets etc...
+    for i in range(int(np.round(np.max(gmm.weights)))):
+        _idx.append(np.where(gmm.weights > (i + 0.5) / n_components)[0])
+    idx = np.concatenate(_idx)
+    weights = gmm.weights[idx]
+    weights = weights / np.sum(weights)
+    return GMM(gmm.means[idx], gmm.covariances[idx], weights)
 
 
 def main():
