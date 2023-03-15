@@ -32,10 +32,10 @@ def plot_mtt(sensor_imgs, position_imgs, info):
     ax[0].set_title("Sensor Image")
     ax[0].imshow(sensor_img, extent=extent, origin="lower", cmap="gray_r")
 
-    ax[1].set_title("Groud Truth Image")
+    ax[1].set_title("Output Image")
     ax[1].imshow(position_img, extent=extent, origin="lower", cmap="gray_r")
     ax[1].legend(
-        ["Target", "Sensor", "Detection", "Clutter"],
+        ["Target", "Sensor", "Sensor Measurement"],
         loc="center left",
         bbox_to_anchor=(1, 0.5),
     )
