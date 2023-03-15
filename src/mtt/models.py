@@ -199,6 +199,7 @@ class Conv2dCoder(EncoderDecoder):
         batch_norm: bool = True,
         activation: str = "leaky_relu",
         upsampling: str = "transpose",
+        deprecated_api: bool = False,
         **kwargs,
     ):
         """
@@ -242,6 +243,10 @@ class Conv2dCoder(EncoderDecoder):
             )
             if batch_norm:
                 encoder_layers += [nn.BatchNorm2d(encoder_channels[i])]
+            elif deprecated_api:
+                encoder_layers += [
+                    nn.Identity()
+                ]  # TODO: remove once new models come in
             if upsampling == "transpose":
                 encoder_layers += [
                     nn.Conv2d(
@@ -275,6 +280,10 @@ class Conv2dCoder(EncoderDecoder):
         for i in range(len(decoder_channels) - 1):
             if batch_norm:
                 decoder_layers += [nn.BatchNorm2d(decoder_channels[i])]
+            elif deprecated_api:
+                decoder_layers += [
+                    nn.Identity()
+                ]  # TODO: remove once new models come in
             if upsampling == "transpose":
                 # specify output_padding to resolve output shape ambiguity when stride > 1
                 input_shape = np.asarray(decoder_shapes[i], dtype=np.int32)
@@ -337,21 +346,25 @@ def load_model(uri: str) -> Tuple[Conv2dCoder, str]:
     Args:
         uri (str): The uri of the model to load. By default this is a path to a file. If you want to use a wandb model, use the format wandb://<user>/<project>/<run_id>.
     """
-    if uri.startswith("wandb://"):
-        import wandb
+    with TemporaryDirectory() as tmpdir:
+        if uri.startswith("wandb://"):
+            import wandb
 
-        user, project, run_id = uri[len("wandb://") :].split("/")
+            user, project, run_id = uri[len("wandb://") :].split("/")
 
-        # Download the model from wandb to temporary directory
-        with TemporaryDirectory() as tmpdir:
+            # Download the model from wandb to temporary directory
             api = wandb.Api()
             artifact = api.artifact(
                 f"{user}/{project}/model-{run_id}:best_k", type="model"
             )
             artifact.download(root=tmpdir)
-            model = Conv2dCoder.load_from_checkpoint(f"{tmpdir}/model.ckpt")
+            uri = f"{tmpdir}/model.ckpt"
             name = run_id
-    else:
-        model = Conv2dCoder.load_from_checkpoint(uri)
-        name = os.path.basename(uri).split(".")[0]
-    return model, name
+        else:
+            name = os.path.basename(uri).split(".")[0]
+        try:
+            model = Conv2dCoder.load_from_checkpoint(uri)
+        except RuntimeError:
+            # try loading using old API
+            model = Conv2dCoder.load_from_checkpoint(uri, deprecated_api=True)
+        return model, name
