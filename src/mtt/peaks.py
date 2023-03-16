@@ -67,7 +67,11 @@ def find_peaks(
     if method == "gmm":
         return fit_gmm(samples, n_components=n_components)
     elif method == "kmeans":
-        return fit_kmeans(samples, n_components=n_components, n_components_range=3)
+        return fit_kmeans(
+            samples,
+            n_components=n_components,
+            n_components_range=2,
+        )
     elif method == "lloyd":
         peaks, _ = compute_peaks(
             image.T, threshold_val=1e-4, blur_sigma=1, region_size=7
@@ -111,13 +115,13 @@ def fit_kmeans(samples: np.ndarray, n_components: int, n_components_range=0):
             best_itertia = knn.inertia_
             best_means = knn.cluster_centers_
             best_labels = knn.labels_
+            assert best_labels is not None
 
     # compute weight use the relative number of points in each cluster
     weights = np.bincount(best_labels) / best_labels.size
-    # weights = np.ones(best_means.shape[0]) / best_means.shape[0]
-
     covariances = np.zeros((best_means.shape[0], 2, 2))
-    return GMM(best_means, covariances, weights)
+    gmm = GMM(best_means, covariances, weights)
+    return reweigh(gmm, n_components)
 
 
 def fit_gmm(samples: np.ndarray, n_components: int) -> GMM:
@@ -143,13 +147,31 @@ def fit_gmm(samples: np.ndarray, n_components: int) -> GMM:
 
 
 def reweigh(gmm: GMM, n_components):
+    """
+    1. Rescale the gmm weights so that the sum of the weights is equal to n_components.
+    2. Split components with a weight larger than 1.0 into multiple components of weight at most 1.0.
+    For example, if a component has a weight of 2.6, it will be split into 2 components of weight 2 and one component of weight 0.6.
+    3. Remove components with a weight smaller than 0.5.
+    """
+    weights = gmm.weights * n_components
+
     _idx = []
-    # if weights more that 1.5 then these are two targets etc...
-    for i in range(int(np.round(np.max(gmm.weights)))):
-        _idx.append(np.where(gmm.weights > (i + 0.5) / n_components)[0])
+    _weights = []
+    # split components with a weight larger than 1.0 into multiple components of weight at most 1.0
+    for i in range(int(np.round(np.max(weights)))):
+        # discard weights smaller than 0.5
+        _idx.append(np.where(weights > i)[0])
+        if i == 0:
+            # the first component will have the current weight minus the integer part
+            _weights.append(weights[_idx[-1]] - np.floor(weights[_idx[-1]]))
+        else:
+            # the rest of the components will have a weight of 1
+            _weights.append(np.ones(_idx[-1].shape[0]))
     idx = np.concatenate(_idx)
-    weights = gmm.weights[idx]
-    weights = weights / np.sum(weights)
+    weights = np.concatenate(_weights)
+    # get the n_components largest weights
+    idx = idx[np.argsort(weights)[::-1][:n_components]]
+    weights = weights[np.argsort(weights)[::-1][:n_components]]
     return GMM(gmm.means[idx], gmm.covariances[idx], weights)
 
 
