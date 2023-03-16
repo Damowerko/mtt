@@ -65,7 +65,7 @@ def test_model(model: Conv2dCoder, data_path: str, scale: int = 1):
         for step_idx, data in enumerate(simulation):
             data: StackedImageData = data
             with torch.no_grad():
-                output = model.forward(data.sensor_images.cuda())
+                output = model.forward(data.sensor_images.cuda().unsqueeze(0))
 
             mse = (output[-1] - data.target_images[-1]).pow(2).mean().item()
             cardinality_target = model.cardinality_from_image(
@@ -79,7 +79,9 @@ def test_model(model: Conv2dCoder, data_path: str, scale: int = 1):
             #     output[-1].cpu().numpy(), width=data.info[-1]["window"], model="gmm"
             # ).means
             targets_kmeans = find_peaks(
-                output[-1].cpu().numpy(), width=data.info[-1]["window"], method="kmeans"
+                output[-1, -1].cpu().numpy(),
+                width=data.info[-1]["window"],
+                method="kmeans",
             ).means
             # ospa_gmm = compute_ospa(targets_truth, targets_gmm, 500)
             ospa_kmeans = compute_ospa(targets_truth, targets_kmeans, 500)
