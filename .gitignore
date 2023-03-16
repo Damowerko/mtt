@@ -7,3 +7,4 @@ figures/
 .vscode/
 **/.ipynb_checkpoints/
 cluster/
+out/**
