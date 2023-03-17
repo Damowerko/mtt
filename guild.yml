@@ -6,7 +6,8 @@
       flags-import: all
       sourcecode:
         select:
-          - "*.py"
+          - exclude:
+              dir: data
           - include:
               dir: scripts
           - include:
@@ -21,7 +22,8 @@
           select: '.+\.ckpt'
       sourcecode:
         select:
-          - "*.py"
+          - exclude:
+              dir: data
           - include:
               dir: scripts
           - include:
