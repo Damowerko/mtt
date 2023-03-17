@@ -29,15 +29,21 @@ def main():
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="./out/generalization",
+        default="./data/out/generalization",
         help="The directory to save the results.",
+    )
+    parser.add_argument(
+        "--max-scale",
+        type=int,
+        default=5,
+        help="The maximum scale to test on. The data directory should have folders called 1km, 2km, 3km etc.",
     )
 
     args = parser.parse_args()
 
     model, name = load_model(args.model_uri)
     results: List[pd.DataFrame] = []
-    for scale in range(1, 4):
+    for scale in range(1, args.max_scale + 1):
         print(f"Testing model on {scale}km")
         result = test_model(
             model,
