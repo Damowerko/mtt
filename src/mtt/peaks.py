@@ -1,13 +1,12 @@
-from typing import Iterable, NamedTuple, Tuple, Union
+from typing import NamedTuple
 
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 import torch
 from sklearn.cluster import KMeans
-from sklearn.mixture import BayesianGaussianMixture, GaussianMixture
+from sklearn.mixture import GaussianMixture
 
-from mtt.lloyd import compute_peaks
 from mtt.utils import gaussian, make_grid
 
 rng = np.random.default_rng()
@@ -72,16 +71,6 @@ def find_peaks(
             n_components=n_components,
             n_components_range=2,
         )
-    elif method == "lloyd":
-        peaks, _ = compute_peaks(
-            image.T, threshold_val=1e-4, blur_sigma=1, region_size=7
-        )
-        peaks = (peaks / 128 - 0.5) * width
-        return GMM(
-            peaks,
-            np.zeros((peaks.shape[0], 2, 2)),
-            np.ones(peaks.shape[0]) / peaks.shape[0],
-        )
     else:
         raise ValueError(f"Unknown model: {method}")
 
@@ -90,10 +79,13 @@ def sample_image(img: np.ndarray, width: float, center=(0, 0)) -> np.ndarray:
     """
     Sample `img` based on pixel values.
     """
+    n_samples = int(1000 * img.size / 128**2)
     XY = make_grid(img.shape, width, center=center)
     # add epsilon to avoid division by zero
     img += 1e-8
-    idx = rng.choice(img.size, size=1000, p=img.reshape(-1) / img.sum(), shuffle=False)
+    idx = rng.choice(
+        img.size, size=n_samples, p=img.reshape(-1) / img.sum(), shuffle=False
+    )
     return XY.reshape(-1, 2)[idx]
 
 
