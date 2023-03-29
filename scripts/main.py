@@ -105,7 +105,7 @@ def test(trainer: pl.Trainer, params: argparse.Namespace):
 
 def study(params: argparse.Namespace):
     torch.set_float32_matmul_precision("high")
-    study_name = "mtt-cactus"
+    study_name = "mtt-tomato"
     storage = os.environ["OPTUNA_STORAGE"]
     pruner = optuna.pruners.HyperbandPruner(
         min_resource=5, max_resource=200, reduction_factor=3
@@ -128,13 +128,13 @@ def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace):
         lr=trial.suggest_float("lr", 1e-8, 1e-1, log=True),
         weight_decay=trial.suggest_float("weight_decay", 1e-10, 1, log=True),
         batch_norm=trial.suggest_categorical("batch_norm", [True, False]),
-        n_encoder=4,
+        upsampling=trial.suggest_categorical("upsampling", ["nearest", "transpose"]),
+        n_encoder=3,
         n_hidden=4,
         n_channels=128,
         n_channels_hidden=1024,
         kernel_size=9,
-        upsampling="nearest",
-        cardinality_weight=0.00001,
+        cardinality_weight=1e-7,
         activation="leaky_relu",
         optimizer="adamw",
     )
