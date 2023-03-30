@@ -9,6 +9,60 @@ from mtt.target import Target
 from mtt.utils import to_cartesian
 
 
+def position_image(
+    window_width: float,
+    size: int,
+    sigma: float,
+    target_positions: npt.NDArray[np.floating],
+    device=None,
+    weights: Optional[npt.NDArray[np.floating]] = None,
+    covariances: Optional[npt.NDArray[np.floating]] = None,
+):
+    """
+    Create an image of the targets at the given positions.
+
+    Args:
+        size: The withd and height of the image.
+        sigma: The size of the position blob.
+        target_positions: (N,2) The positions of the targets.
+        device: The device to move the tensor to.
+    """
+    if target_positions.size == 0:
+        return torch.zeros((size, size), device=device)
+    x, y = torch.as_tensor(target_positions, device=device).T
+    # only consider measurements in windows
+    X, Y = torch.meshgrid(
+        torch.linspace(-window_width / 2, window_width / 2, size, device=device),
+        torch.linspace(-window_width / 2, window_width / 2, size, device=device),
+        indexing="ij",
+    )
+    dx = X.reshape(-1, 1) - x.reshape(1, -1)
+    dy = Y.reshape(-1, 1) - y.reshape(1, -1)
+    if covariances is None:
+        cxx = 1 / sigma**2
+        cyy = 1 / sigma**2
+        cxy = 0
+        det = cxx * cyy - cxy**2
+    else:
+        cov = torch.as_tensor(covariances, device=device)
+        cov_inv = torch.inverse(cov)
+        # covariance inverse coefficients
+        cxx = cov_inv[:, 0, 0]
+        cyy = cov_inv[:, 1, 1]
+        cxy = cov_inv[:, 0, 1]
+        det = (cxx * cyy - cxy**2)[None, :]
+    Z = (
+        torch.exp(-(dx**2 * cxx + dy**2 * cyy + 2 * dx * dy * cxy) * 0.5)
+        * det**0.5
+    )
+    if weights is not None:
+        Z *= torch.as_tensor(weights, device=device)[None, :]
+    Z = Z.sum(dim=1)
+    # scale so that each peak sums to 1
+    Z *= (128 / size) ** 2 * (10 / 0.1613) / (2 * torch.pi)
+    return Z.reshape((size, size)).T  # transpose to match image coordinates
+
+
 class Simulator:
     def __init__(
         self,
@@ -182,23 +236,13 @@ class Simulator:
             target_positions: (N,2) The positions of the targets.
             device: The device to move the tensor to.
         """
-        x, y = torch.as_tensor(target_positions, device=device).T
-        # only consider measurements in windows
-        X, Y = torch.meshgrid(
-            torch.linspace(
-                -self.window_width / 2, self.window_width / 2, size, device=device
-            ),
-            torch.linspace(
-                -self.window_width / 2, self.window_width / 2, size, device=device
-            ),
-            indexing="ij",
+        return position_image(
+            self.window_width,
+            size,
+            sigma,
+            target_positions,
+            device=device,
         )
-        dx = X.reshape(-1, 1) - x.reshape(1, -1)
-        dy = Y.reshape(-1, 1) - y.reshape(1, -1)
-        Z = torch.exp(-(dx**2 + dy**2) * 0.5 / sigma**2).sum(dim=1)
-        # scale so that each peak sums to 1
-        Z /= 2 * torch.pi * sigma**2 * 0.01612901 / (128 / size) ** 2
-        return Z.reshape((size, size)).T  # transpose to match image coordinates
 
     def measurement_image(
         self,
