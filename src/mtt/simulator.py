@@ -16,7 +16,6 @@ def position_image(
     target_positions: npt.NDArray[np.floating],
     device=None,
     weights: Optional[npt.NDArray[np.floating]] = None,
-    covariances: Optional[npt.NDArray[np.floating]] = None,
 ):
     """
     Create an image of the targets at the given positions.
@@ -38,28 +37,12 @@ def position_image(
     )
     dx = X.reshape(-1, 1) - x.reshape(1, -1)
     dy = Y.reshape(-1, 1) - y.reshape(1, -1)
-    if covariances is None:
-        cxx = 1 / sigma**2
-        cyy = 1 / sigma**2
-        cxy = 0
-        det = cxx * cyy - cxy**2
-    else:
-        cov = torch.as_tensor(covariances, device=device)
-        cov_inv = torch.inverse(cov)
-        # covariance inverse coefficients
-        cxx = cov_inv[:, 0, 0]
-        cyy = cov_inv[:, 1, 1]
-        cxy = cov_inv[:, 0, 1]
-        det = (cxx * cyy - cxy**2)[None, :]
-    Z = (
-        torch.exp(-(dx**2 * cxx + dy**2 * cyy + 2 * dx * dy * cxy) * 0.5)
-        * det**0.5
-    )
+    Z = torch.exp(-(dx**2 + dy**2) * 0.5 / sigma**2)
     if weights is not None:
         Z *= torch.as_tensor(weights, device=device)[None, :]
     Z = Z.sum(dim=1)
     # scale so that each peak sums to 1
-    Z *= (128 / size) ** 2 * (10 / 0.1613) / (2 * torch.pi)
+    Z *= (128 / size) ** 2 * (10 / 0.1613) / (2 * torch.pi) / sigma**2
     return Z.reshape((size, size)).T  # transpose to match image coordinates
 
 
