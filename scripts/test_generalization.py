@@ -41,6 +41,9 @@ def main():
 
     args = parser.parse_args()
 
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+
     model, name = load_model(args.model_uri)
     results: List[pd.DataFrame] = []
     for scale in range(1, args.max_scale + 1):
@@ -53,10 +56,9 @@ def main():
         # data in data_dir is organized by scale in folders: 1km, 2km, 3km etc.
         result["scale"] = scale
         results.append(result)
-    df = pd.concat(results)
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
-    df.to_csv(os.path.join(args.output_dir, f"{name}.csv"), index=False)
+        # save results after each scale to avoid losing everything if something goes wrong
+        df = pd.concat(results)
+        df.to_csv(os.path.join(args.output_dir, f"{name}.csv"), index=False)
 
 
 def test_model(model: Conv2dCoder, data_path: str, scale: int = 1):
@@ -80,17 +82,13 @@ def test_model(model: Conv2dCoder, data_path: str, scale: int = 1):
             cardinality_output = model.cardinality_from_image(output).item()
             cardinality_truth = len(data.info[-1]["target_positions"])
 
-            targets_truth = data.info[-1]["target_positions"]
-            # targets_gmm = find_peaks(
-            #     output[-1].cpu().numpy(), width=data.info[-1]["window"], model="gmm"
-            # ).means
-            targets_kmeans = find_peaks(
+            positions_truth = data.info[-1]["target_positions"]
+            positions_estimates = find_peaks(
                 output[-1, -1].cpu().numpy(),
                 width=data.info[-1]["window"],
                 method="kmeans",
             ).means
-            # ospa_gmm = compute_ospa(targets_truth, targets_gmm, 500)
-            ospa_kmeans = compute_ospa(targets_truth, targets_kmeans, 500)
+            ospa = compute_ospa(positions_truth, positions_estimates, 500)
 
             result.append(
                 dict(
@@ -100,8 +98,7 @@ def test_model(model: Conv2dCoder, data_path: str, scale: int = 1):
                     cardinality_target=cardinality_target,
                     cardinality_output=cardinality_output,
                     cardinality_truth=cardinality_truth,
-                    # ospa_gmm=ospa_gmm,
-                    ospa_kmeans=ospa_kmeans,
+                    ospa=ospa,
                 )
             )
     return pd.DataFrame(result)
