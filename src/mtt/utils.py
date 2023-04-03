@@ -114,7 +114,7 @@ def compute_ospa_components(
 
     # ospa is symmetric, so we assume m <= n.
     if m > n:
-        return compute_ospa_components(Y, X, cutoff)
+        return compute_ospa_components(Y, X, cutoff, p)
     if n == 0:
         return 0, 0
     if m == 0:
