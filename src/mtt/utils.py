@@ -120,9 +120,10 @@ def compute_ospa_components(
     if m == 0:
         return 0, cutoff
 
-    dist = cdist(X, Y, metric="minkowski", p=p) ** p
+    dist = cdist(X, Y, metric="minkowski", p=2)
+    dist = np.minimum(dist, cutoff) ** p
     xidx, yidx = linear_sum_assignment(dist)
-    ospa_distance: float = np.minimum(dist[xidx, yidx], cutoff**p).sum() / n
+    ospa_distance: float = dist[xidx, yidx].sum() / n
     # since m <= n, for any unassigned y we have a cost of cutoff
     ospa_cardinality = cutoff**p * (n - m) / n
 
