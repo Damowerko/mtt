@@ -42,7 +42,7 @@ def position_image(
         Z *= torch.as_tensor(weights, device=device)[None, :]
     Z = Z.sum(dim=1)
     # scale so that each peak sums to 1
-    Z *= (128 / size) ** 2 * (10 / 0.1613) / (2 * torch.pi) / sigma**2
+    Z *= (10 / 0.1613) / (2 * torch.pi) / sigma**2
     return Z.reshape((size, size)).T  # transpose to match image coordinates
 
 
