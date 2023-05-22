@@ -1,0 +1,104 @@
+from argparse import ArgumentParser
+
+import pandas as pd
+from tqdm import tqdm
+
+from mtt.simulator import position_image
+from mtt.utils import compute_ospa
+
+parser = ArgumentParser()
+parser.add_argument("filter_name", type=str)
+parser.add_argument(
+    "-d",
+    "--data_dir",
+    type=str,
+    default="data/sim_data/",
+    help="Directory where data is stored.",
+)
+parser.add_argument(
+    "-o",
+    "--output_dir",
+    type=str,
+    default="data/out/",
+    help="Directory where output is stored.",
+)
+args = parser.parse_args()
+
+filter_name = args.filter_name
+cols = ["scale", "simulation_idx", "step_idx", "posx_m", "posy_m", "exist_prob"]
+
+df_truth = pd.read_csv(
+    f"{args.data_dir}/{args.filter_name}_truth.csv", low_memory=False
+)
+df_filter = pd.read_csv(
+    f"{args.data_dir}/{args.filter_name}_estimates.csv", low_memory=False
+)
+df_combined = (
+    pd.concat([df_truth, df_filter], axis=0, keys=["truth", "filter"])
+    .reset_index(level=0, names=["truth"])
+    .rename(columns={"time": "step_idx"})
+)
+integer_columns = ["scale", "step_idx"]
+df_combined[integer_columns] = df_combined[integer_columns].astype(int)
+
+n_scales = df_combined["scale"].unique().size
+n_simulations = df_combined["simulation_idx"].max() + 1
+n_steps = df_combined["step_idx"].max() + 1
+
+
+def to_image(df: pd.DataFrame, scale: int):
+    # get the positions of the targets
+    # ignore targets with nan values for position
+    na_positions = df[["posx_m", "posy_m"]].isna().any(axis=1)
+    positions = df[["posx_m", "posy_m"]].to_numpy()[~na_positions]
+    weights = df["exist_prob"].fillna(0.0).to_numpy()[~na_positions]
+
+    # LMCO uses a convention of (0,0) being the corner of the image
+    offset = 2000.0 + 1000.0 * scale / 2
+    # subtract the offset to get the correct position in our coordinates
+    positions -= offset
+
+    assert len(positions) == len(weights)
+    return position_image(
+        window_width=1000 * scale,
+        size=128 * scale,
+        sigma=10.0,
+        target_positions=positions,
+        device="cuda",
+        weights=weights,
+    )
+
+
+results = []
+groupby_columns = ["simulation_idx", "step_idx", "scale"]
+gb = df_combined.groupby(groupby_columns, as_index=False, sort=True)
+for (idx, df) in tqdm(gb, total=len(gb)):
+    # comptue OSPA at each time-step for each simulation
+    simulation_idx, step_idx, scale = idx
+    truth = df[df["truth"] == "truth"]
+    filter = df[df["truth"] == "filter"]
+
+    truth_positions = truth[["posx_m", "posy_m"]].dropna().to_numpy()
+    filter_positions = (
+        filter.query("exist_prob >= 0.5")[["posx_m", "posy_m"]].dropna().to_numpy()
+    )
+    ospa = compute_ospa(truth_positions, filter_positions, 500, 2)
+
+    truth_image = to_image(truth, scale)
+    filter_image = to_image(filter, scale)
+    mse = (truth_image - filter_image).pow(2).mean().item()
+    results.append(
+        dict(
+            scale=scale,
+            simulation_idx=simulation_idx,
+            step_idx=step_idx,
+            ospa=ospa,
+            mse=mse,
+            filter=args.filter_name,
+            cardinality_truth=len(truth_positions),
+            cardinality_estimate=filter["exist_prob"].sum(),
+            n_sensors=len(truth_positions),
+        )
+    )
+df_results = pd.DataFrame(results)
+df_results.to_csv(f"{args.output_dir}/{args.filter_name}_summary.csv", index=False)
