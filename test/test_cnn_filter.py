@@ -2,7 +2,7 @@ import numpy as np
 
 from mtt.cnn_filter import EncoderDecoderFilter, convert_measurements
 from mtt.data import OnlineDataset
-from mtt.models import load_model
+from mtt.models.convolutional import load_model
 from mtt.utils import to_polar
 
 
@@ -16,7 +16,15 @@ def test_convert_measurements_inverse():
 
 def test_encoder_decoder():
     model, _ = load_model("wandb://damowerko/mtt/e7ivqipk")
-    filter = EncoderDecoderFilter(model, 1000)
+    filter = EncoderDecoderFilter(
+        model,
+        1000,
+        sensor_kwargs=dict(
+            range_max=2000,
+            noise=(10.0, 0.035),
+            p_detection=0.95,
+        ),
+    )
 
     # get dataset to test on
     t = 0
@@ -61,5 +69,5 @@ def test_encoder_decoder():
     # check that the filter is not outputting nonsense
     mean_cardinality = np.mean([len(s[1]) for s in states])
     assert (
-        3.0 < mean_cardinality < 18.0
+        8.0 < mean_cardinality < 12.0
     ), f"Mean cardinality {mean_cardinality} is not within expected range"
