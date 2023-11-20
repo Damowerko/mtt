@@ -1,5 +1,6 @@
 import argparse
 import os
+from time import time
 from typing import Dict, List
 
 import pandas as pd
@@ -17,7 +18,7 @@ def main():
     parser.add_argument(
         "--model-uri",
         type=str,
-        default="./models/58c6fd8a.ckpt",
+        default="./models/e7ivqipk.ckpt",
         help="The uri of the model to test. By default this is a path to a file. If you want to use a wandb model, use the format wandb://<user>/<project>/<run_id>.",
     )
     parser.add_argument(
@@ -38,6 +39,11 @@ def main():
         default=5,
         help="The maximum scale to test on. The data directory should have folders called 1km, 2km, 3km etc.",
     )
+    parser.add_argument(
+        "--runtime",
+        action="store_true",
+        help="Test runtime instead of performance.",
+    )
 
     args = parser.parse_args()
 
@@ -45,10 +51,13 @@ def main():
         os.makedirs(args.output_dir)
 
     model, name = load_model(args.model_uri)
+    output_filename = f"{name}_runtime.csv" if args.runtime else f"{name}.csv"
+
     results: List[pd.DataFrame] = []
     for scale in range(1, args.max_scale + 1):
         print(f"Testing model on {scale}km")
-        result = test_model(
+        test_fn = test_runtime if args.runtime else test_model
+        result = test_fn(
             model,
             os.path.join(args.data_dir, f"{scale}km", "simulations.pkl"),
             scale=scale,
@@ -58,7 +67,53 @@ def main():
         results.append(result)
         # save results after each scale to avoid losing everything if something goes wrong
         df = pd.concat(results)
-        df.to_csv(os.path.join(args.output_dir, f"{name}.csv"), index=False)
+        df.to_csv(os.path.join(args.output_dir, output_filename), index=False)
+
+
+def test_runtime(model: Conv2dCoder, data_path: str, scale=1):
+    model = model.cuda().eval()
+    t_start = time()
+    datapipe = build_test_datapipe(
+        data_path,
+        unbatch=False,
+        vector_to_image_kwargs=dict(device="cuda", img_size=128 * scale),
+    )
+    # get the next data sample
+    simulation = next(iter(datapipe))
+    dt_load_data = time() - t_start
+
+    simulation_iter = iter(simulation)
+    times = []
+    while True:
+        t_start = time()
+        data: StackedImageData | None = next(simulation_iter, None)
+        if data is None:
+            break
+        t_data = time()
+
+        with torch.no_grad():
+            output = model.forward(data.sensor_images.cuda().unsqueeze(0))
+        # sync to measure the time to finish computation
+        torch.cuda.synchronize()
+        t_forward = time()
+
+        positions_estimates = find_peaks(
+            output[-1, -1].cpu().numpy(),
+            width=data.info[-1]["window"],
+            method="kmeans",
+        ).means
+        t_peaks = time()
+
+        times += [
+            dict(
+                data=t_data - t_start,
+                forward=t_forward - t_data,
+                peaks=t_peaks - t_forward,
+            )
+        ]
+    df = pd.DataFrame(times)
+    df["load"] = dt_load_data / len(df)
+    return df
 
 
 def test_model(model: Conv2dCoder, data_path: str, scale: int = 1):
