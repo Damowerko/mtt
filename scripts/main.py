@@ -15,7 +15,7 @@ from pytorch_lightning.loggers.wandb import WandbLogger
 from torch.utils.data import DataLoader
 
 from mtt.data import OnlineDataset, build_train_datapipe, collate_fn
-from mtt.models import Conv2dCoder
+from mtt.models.convolutional import Conv2dCoder
 from mtt.simulator import Simulator
 
 

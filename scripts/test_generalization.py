@@ -7,7 +7,7 @@ import torch
 from tqdm import tqdm
 
 from mtt.data import StackedImageData, build_test_datapipe, collate_fn
-from mtt.models import Conv2dCoder, load_model
+from mtt.models.convolutional import Conv2dCoder, load_model
 from mtt.peaks import find_peaks
 from mtt.utils import compute_ospa
 
