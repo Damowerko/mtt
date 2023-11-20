@@ -1,7 +1,6 @@
 import os
-import subprocess
 from tempfile import TemporaryDirectory
-from typing import Callable, Tuple, Type
+from typing import Callable, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from pytorch_lightning.utilities.argparse import get_init_arguments_and_types
 
-from mtt.data import StackedImageBatch, StackedImageData
+from mtt.data import StackedImageBatch
 from mtt.peaks import find_peaks
 from mtt.utils import compute_ospa
 
@@ -36,7 +35,7 @@ def conv_transpose_output(shape, kernel_size, stride, padding, dilation):
     return tuple((shape - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + 1)
 
 
-class EncoderDecoder(pl.LightningModule):
+class EncoderDConv2dCoderConv2dCoderecoder(pl.LightningModule):
     @classmethod
     def add_model_specific_args(cls, group):
         for base in cls.__bases__:
