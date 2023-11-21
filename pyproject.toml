@@ -8,7 +8,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.11,<3.12"
 numpy = "^1.22.1"
-pandas = "^1.5.3"
+pandas = "^2.0.3"
 matplotlib = "^3.6.2"
 seaborn = "^0.12.1"
 scikit-learn = "^1.2.0"
@@ -19,9 +19,10 @@ optuna = "^3.2.0"
 optuna-dashboard = "^0.8.1"
 psycopg2-binary = "^2.9.5"
 scipy = "^1.11.1"
-torch = "^2.0.1"
-torchdata = "^0.6.1"
-pytorch-lightning = "1.8.*"
+torch = "=2.0.0"
+torchdata = "^0.7.1"
+pytorch-lightning = "^2.0.5"
+torchcps = {git = "https://github.com/Damowerko/torchcps"}
 
 [tool.poetry.group.dev.dependencies]
 black = "^22.8.0"
@@ -29,6 +30,15 @@ jupyter = "^1.0.0"
 ipympl = "^0.8.7"
 pytest = "^7.2.0"
 plotly = "^5.13.1"
+
+[[tool.poetry.source]]
+name = "PyPI"
+priority = "supplemental"
+
+[[tool.poetry.source]]
+name = "pyg"
+url = "https://data.pyg.org/whl/torch-2.0.0+cu118.html"
+priority = "primary"
 
 [build-system]
 requires = ["poetry-core"]
