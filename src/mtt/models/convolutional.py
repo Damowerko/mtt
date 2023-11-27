@@ -1,3 +1,4 @@
+import inspect
 import os
 from tempfile import TemporaryDirectory
 from typing import Callable, Tuple
@@ -8,7 +9,6 @@ import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pytorch_lightning.utilities.argparse import get_init_arguments_and_types
 
 from mtt.data import StackedImageBatch
 from mtt.peaks import find_peaks
@@ -35,7 +35,23 @@ def conv_transpose_output(shape, kernel_size, stride, padding, dilation):
     return tuple((shape - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + 1)
 
 
-class EncoderDConv2dCoderConv2dCoderecoder(pl.LightningModule):
+def get_init_arguments_and_types(cls):
+    """
+
+    Args:
+        cls: class to get init arguments from
+
+    Returns:
+        list of tuples (name, type, default)
+    """
+    parameters = inspect.signature(cls).parameters
+    args = []
+    for name, parameter in parameters.items():
+        args.append((name, parameter.annotation, parameter.default))
+    return args
+
+
+class EncoderDecoder(pl.LightningModule):
     @classmethod
     def add_model_specific_args(cls, group):
         for base in cls.__bases__:
