@@ -2,11 +2,12 @@ import argparse
 import os
 import pickle
 from functools import partial
+from math import ceil
 
 import torch
 import tqdm
 
-from mtt.data import OnlineDataset, generate_vectors, stack_images
+from mtt.data import OnlineImageDataset, generate_vectors, stack_images
 from mtt.simulator import Simulator
 
 
@@ -16,7 +17,7 @@ def main(args):
     if len(os.listdir(args.out_dir)) > 0:
         raise ValueError(f"Output directory {args.out_dir} is not empty.")
 
-    online_dataset = OnlineDataset(
+    online_dataset = OnlineImageDataset(
         n_steps=119,
         length=20,
         img_size=128 * args.scale,
@@ -36,6 +37,9 @@ def main(args):
 
     if args.no_images:
         return
+
+    images_dir = os.path.join(args.out_dir, "images")
+    os.mkdir(images_dir)
     for i, simulation in tqdm.tqdm(
         enumerate(vectors_list),
         total=args.n_simulations,
@@ -43,7 +47,7 @@ def main(args):
         unit="image",
     ):
         images = [online_dataset.vector_to_image(v) for v in simulation]
-        with open(os.path.join(args.out_dir, f"{i}.pt"), "wb") as f:
+        with open(os.path.join(images_dir, f"{i}.pt"), "wb") as f:
             torch.save(stack_images(images), f)
 
 
@@ -59,5 +63,6 @@ if __name__ == "__main__":
         action="store_true",
         help="Don't generate images. Only save the simulation data.",
     )
+    parser.add_argument("--sims-per-file", type=int, default=1000)
     args = parser.parse_args()
     main(args)
