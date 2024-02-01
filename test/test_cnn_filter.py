@@ -1,7 +1,7 @@
 import numpy as np
 
 from mtt.cnn_filter import EncoderDecoderFilter, convert_measurements
-from mtt.data import OnlineDataset
+from mtt.data.image import OnlineImageDataset
 from mtt.models.convolutional import load_model
 from mtt.utils import to_polar
 
@@ -28,7 +28,7 @@ def test_encoder_decoder():
 
     # get dataset to test on
     t = 0
-    dataset = OnlineDataset(n_steps=100, device="cpu")
+    dataset = OnlineImageDataset(n_steps=100, device="cpu")
     states = []
     for (
         _,
@@ -36,7 +36,7 @@ def test_encoder_decoder():
         measurements,
         clutter,
         simulator,
-    ) in dataset.iter_vectors():
+    ) in dataset.sim_generator:
         window_center = np.array(
             (simulator.window_width / 2, simulator.window_width / 2)
         )

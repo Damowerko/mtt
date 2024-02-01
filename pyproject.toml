@@ -8,7 +8,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.11,<3.12"
 numpy = "^1.22.1"
-pandas = "^2.0.3"
+pandas = "^2.2.0"
 matplotlib = "^3.6.2"
 seaborn = "^0.13.0"
 scikit-learn = "^1.2.0"
@@ -19,10 +19,8 @@ optuna = "^3.2.0"
 optuna-dashboard = "^0.8.1"
 psycopg2-binary = "^2.9.5"
 scipy = "^1.11.1"
-torch = "=2.0.0"
-torchdata = "^0.7.1"
-pytorch-lightning = "^2.0.5"
 torchcps = {git = "https://github.com/Damowerko/torchcps"}
+torchdata = "^0.7.1"
 dask = {extras = ["complete", "distributed", "dataframe"], version = "^2023.11.0"}
 fastavro = "^1.9.0"
 fastparquet = "^2023.10.1"
@@ -40,7 +38,7 @@ priority = "supplemental"
 
 [[tool.poetry.source]]
 name = "pyg"
-url = "https://data.pyg.org/whl/torch-2.0.0+cu118.html"
+url = "https://data.pyg.org/whl/torch-2.1.0+cu121.html"
 priority = "primary"
 
 [build-system]

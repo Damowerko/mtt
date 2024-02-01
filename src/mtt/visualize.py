@@ -5,7 +5,7 @@ import imageio.v3 as iio
 import matplotlib.pyplot as plt
 import numpy as np
 
-from mtt.data import OnlineDataset
+from mtt.data import OnlineImageDataset
 from mtt.simulator import Simulator
 
 rng = np.random.default_rng()
@@ -45,7 +45,7 @@ def plot_mtt(sensor_imgs, position_imgs, info):
 
 if __name__ == "__main__":
     init_simulator = lambda: Simulator()
-    dataset = OnlineDataset(init_simulator=init_simulator, n_steps=100)
+    dataset = OnlineImageDataset(init_simulator=init_simulator, n_steps=100)
     data = list(dataset)
 
     def draw_frame(data):

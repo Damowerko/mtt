@@ -12,28 +12,39 @@ from optuna.integration.pytorch_lightning import PyTorchLightningPruningCallback
 from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.loggers.wandb import WandbLogger
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 
-from mtt.data import OnlineDataset, build_train_datapipe, collate_fn
+from mtt.data.image import OnlineImageDataset, build_image_dp, collate_image_fn
+from mtt.data.tensor import TensorDataset
 from mtt.models.convolutional import Conv2dCoder
+from mtt.models.transformer import SpatialTransformer
 from mtt.simulator import Simulator
+
+models = {
+    "conv2d": Conv2dCoder,
+    "st": SpatialTransformer,
+}
 
 
 def main():
     parser = argparse.ArgumentParser()
 
     # program arguments
-    parser.add_argument("operation", choices=["train", "test", "study"])
-    parser.add_argument("--no_log", action="store_true")
+    group = parser.add_argument_group("General")
+    group.add_argument("operation", type=str, choices=["train", "test", "study"])
+    group.add_argument("--no_log", action="store_true")
+
+    # model arguments
+    subparsers = parser.add_subparsers(title="Model", dest="model", required=True)
+    for name, model in models.items():
+        subparser = subparsers.add_parser(name, add_help=True)
+        subparser = model.add_model_specific_args(subparser)
 
     # data arguments
     group = parser.add_argument_group("Data")
     group.add_argument("--batch_size", type=int, default=32)
     group.add_argument("--files_per_epoch", type=int, default=1000)
-
-    # model arguments
-    group = parser.add_argument_group("Model")
-    group = Conv2dCoder.add_model_specific_args(group)
+    group.add_argument("--data_dir", type=str, default="./data/train")
 
     # trainer arguments
     group = parser.add_argument_group("Trainer")
@@ -60,32 +71,45 @@ def main():
 
 def train(trainer: pl.Trainer, params: argparse.Namespace):
     torch.set_float32_matmul_precision("high")
-    train_dp = build_train_datapipe(
-        "/nfs/general/mtt_data/train",
-        max_files=params.files_per_epoch,
-        map_location=params.map_location,
-    )
+
     dataloader_kwargs = dict(
         batch_size=params.batch_size,
-        collate_fn=collate_fn,
     )
     if params.map_location == "cpu":
         dataloader_kwargs = dict(
             **dataloader_kwargs,
             pin_memory=True,
-            prefetch_factor=4,
-            num_workers=min(torch.multiprocessing.cpu_count(), 4),
+            num_workers=min(torch.multiprocessing.cpu_count(), 16),
         )
-    train_loader = DataLoader(train_dp, **dataloader_kwargs)
 
-    # for validation we will generate samples online, to avoid overfitting
-    val_dataset = get_online_dataset(
-        params,
-        n_experiments=100 // dataloader_kwargs.get("n_workers", 1),
-    )
+    # load dataset for specific model
+    if params.model == "conv2d":
+        train_dataset = build_image_dp(
+            params.data_dir,
+            max_files=params.files_per_epoch,
+            map_location=params.map_location,
+        )
+        val_dataset = get_online_dataset(
+            params,
+            n_experiments=100 // dataloader_kwargs.get("n_workers", 1),
+        )
+        dataloader_kwargs["collate_fn"] = collate_image_fn
+    elif params.model == "st":
+        dataset = TensorDataset(params.data_dir)
+        dataloader_kwargs["collate_fn"] = TensorDataset.collate_fn
+        train_dataset, val_dataset = random_split(
+            dataset, [0.95, 0.05], generator=torch.Generator().manual_seed(42)
+        )
+        # dataset specific params
+        params.measurement_dim = 3
+        params.state_dim = 2
+        params.pos_dim = 2
+    else:
+        raise ValueError(f"Unknown model: {params.model}.")
+
+    train_loader = DataLoader(train_dataset, **dataloader_kwargs)
     val_loader = DataLoader(val_dataset, **dataloader_kwargs)
-
-    model = Conv2dCoder(**vars(params))
+    model = models[params.model](**vars(params))
     trainer.fit(model, train_loader, val_loader, ckpt_path=get_checkpoint_path())
 
 
@@ -96,7 +120,7 @@ def test(trainer: pl.Trainer, params: argparse.Namespace):
         batch_size=1,
         num_workers=num_workers,
         pin_memory=True,
-        collate_fn=collate_fn,
+        collate_fn=collate_image_fn,
     )
     trainer = make_trainer(params)
     model = Conv2dCoder(**vars(params))
@@ -234,7 +258,7 @@ def get_checkpoint_path() -> Union[str, None]:
 
 
 def get_online_dataset(params: argparse.Namespace, n_experiments=1, n_steps=100):
-    return OnlineDataset(
+    return OnlineImageDataset(
         **dict(
             **vars(params),
             length=params.input_length,

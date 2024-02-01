@@ -1,21 +1,22 @@
 import argparse
-import os
 import pickle
 from functools import partial
-from math import ceil
+from pathlib import Path
 
+import dask
 import torch
 import tqdm
 
-from mtt.data import OnlineImageDataset, generate_vectors, stack_images
+from mtt.data import OnlineImageDataset, generate_vectors, stack_images, vector_to_df
 from mtt.simulator import Simulator
 
 
 def main(args):
-    if not os.path.exists(args.out_dir):
-        os.makedirs(args.out_dir)
-    if len(os.listdir(args.out_dir)) > 0:
-        raise ValueError(f"Output directory {args.out_dir} is not empty.")
+    dask.config.set(scheduler="processes")
+
+    out_dir = Path(args.out_dir)
+    if not out_dir.exists():
+        out_dir.mkdir(parents=True)
 
     online_dataset = OnlineImageDataset(
         n_steps=119,
@@ -24,31 +25,59 @@ def main(args):
         device="cuda",
         init_simulator=partial(Simulator, window_width=1000 * args.scale),
     )
-    # start a generator that will yeild a simulation with 119 steps (see data.py)
-    vectors_list = list(
-        generate_vectors(
-            online_dataset,
-            args.n_simulations,
+
+    # check if simulation data already exists
+    if (out_dir / "simulations.pkl").exists():
+        print("Simulation data already exists. Loading from disk...")
+        with (out_dir / "simulations.pkl").open("rb") as f:
+            vectors_list = pickle.load(f)
+    else:
+        print("Generating simulation data.")
+        # start a generator that will yeild a simulation with 119 steps (see data.py)
+        vectors_list = list(
+            generate_vectors(
+                online_dataset,
+                args.n_simulations,
+            )
         )
-    )
-    # save the simulation data
-    with open(os.path.join(args.out_dir, "simulations.pkl"), "wb") as f:
-        pickle.dump(vectors_list, f)
+        # save the simulation data
+        with (out_dir / "simulations.pkl").open("wb") as f:
+            pickle.dump(vectors_list, f)
 
-    if args.no_images:
-        return
+    if not args.no_parquet:
+        # save the dataframes to parquet files
+        if not any(
+            [
+                (out_dir / "targets.parquet").exists(),
+                (out_dir / "measurements.parquet").exists(),
+                (out_dir / "sensors.parquet").exists(),
+            ]
+        ):
+            print("Converting to dataframes and saving to parquet files...")
+            # convert the simulation data to dask dataframes
+            df_targets, df_measurements, df_sensors = vector_to_df(vectors_list)
+            df_targets.to_parquet(out_dir / "targets.parquet")
+            df_measurements.to_parquet(out_dir / "measurements.parquet")
+            df_sensors.to_parquet(out_dir / "sensors.parquet")
+        else:
+            print("Parquet files already exist. Will not overwrite.")
 
-    images_dir = os.path.join(args.out_dir, "images")
-    os.mkdir(images_dir)
-    for i, simulation in tqdm.tqdm(
-        enumerate(vectors_list),
-        total=args.n_simulations,
-        desc="Generating images",
-        unit="image",
-    ):
-        images = [online_dataset.vector_to_image(v) for v in simulation]
-        with open(os.path.join(images_dir, f"{i}.pt"), "wb") as f:
-            torch.save(stack_images(images), f)
+    if not args.no_images:
+        images_dir = out_dir / "images"
+        if images_dir.exists():
+            print("Images already exist. Will not overwrite.")
+        else:
+            images_dir.mkdir()
+
+            for i, simulation in tqdm.tqdm(
+                enumerate(vectors_list),
+                total=args.n_simulations,
+                desc="Generating images",
+                unit="image",
+            ):
+                images = [online_dataset.vector_to_image(v) for v in simulation]
+                with (images_dir / f"{i}.pt").open("wb") as f:
+                    torch.save(stack_images(images), f)
 
 
 if __name__ == "__main__":
@@ -57,6 +86,11 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--n-simulations", type=int, default=100)
     parser.add_argument(
         "-s", "--scale", type=int, default=1, help="Scale of the simulation in km."
+    )
+    parser.add_argument(
+        "--no-parquet",
+        action="store_true",
+        help="Don't save data to parquet dataframes.",
     )
     parser.add_argument(
         "--no-images",

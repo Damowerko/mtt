@@ -10,9 +10,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from mtt.data import StackedImageBatch
+from mtt.data.image import StackedImageBatch
 from mtt.peaks import find_peaks
-from mtt.utils import compute_ospa
+from mtt.utils import add_model_specific_args, compute_ospa
 
 rng = np.random.default_rng()
 
@@ -35,37 +35,10 @@ def conv_transpose_output(shape, kernel_size, stride, padding, dilation):
     return tuple((shape - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + 1)
 
 
-def get_init_arguments_and_types(cls):
-    """
-
-    Args:
-        cls: class to get init arguments from
-
-    Returns:
-        list of tuples (name, type, default)
-    """
-    parameters = inspect.signature(cls).parameters
-    args = []
-    for name, parameter in parameters.items():
-        args.append((name, parameter.annotation, parameter.default))
-    return args
-
-
 class EncoderDecoder(pl.LightningModule):
     @classmethod
     def add_model_specific_args(cls, group):
-        for base in cls.__bases__:
-            if hasattr(base, "add_model_specific_args"):
-                group = base.add_model_specific_args(group)  # type: ignore
-        args = get_init_arguments_and_types(cls)  # type: ignore
-        for name, types, default in args:
-            if types[0] not in (int, float, str, bool):
-                continue
-            if types[0] == bool:
-                group.add_argument(f"--{name}", dest=name, action="store_true")
-            else:
-                group.add_argument(f"--{name}", type=types[0], default=default)
-        return group
+        return add_model_specific_args(cls, group)
 
     def __init__(
         self,

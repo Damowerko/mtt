@@ -7,7 +7,7 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-from mtt.data import StackedImageData, build_test_datapipe, collate_fn
+from mtt.data import StackedImageData, build_vector_to_image_dp, image_collate_fn
 from mtt.models.convolutional import Conv2dCoder, load_model
 from mtt.peaks import find_peaks
 from mtt.utils import compute_ospa
@@ -73,7 +73,7 @@ def main():
 def test_runtime(model: Conv2dCoder, data_path: str, scale=1):
     model = model.cuda().eval()
     t_start = time()
-    datapipe = build_test_datapipe(
+    datapipe = build_vector_to_image_dp(
         data_path,
         unbatch=False,
         vector_to_image_kwargs=dict(device="cuda", img_size=128 * scale),
@@ -118,7 +118,7 @@ def test_runtime(model: Conv2dCoder, data_path: str, scale=1):
 
 def test_model(model: Conv2dCoder, data_path: str, scale: int = 1):
     model = model.cuda()
-    datapipe = build_test_datapipe(
+    datapipe = build_vector_to_image_dp(
         data_path,
         unbatch=False,
         vector_to_image_kwargs=dict(device="cuda", img_size=128 * scale),
