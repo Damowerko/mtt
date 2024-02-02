@@ -69,5 +69,5 @@ def test_encoder_decoder():
     # check that the filter is not outputting nonsense
     mean_cardinality = np.mean([len(s[1]) for s in states])
     assert (
-        8.0 < mean_cardinality < 12.0
+        8.0 < float(mean_cardinality) < 12.0
     ), f"Mean cardinality {mean_cardinality} is not within expected range"
