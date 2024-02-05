@@ -5,6 +5,10 @@ on:
     branches:
       - main  # Trigger the workflow on push to main branch
 
+concurrency:
+  group: build-and-push
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
