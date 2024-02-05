@@ -223,17 +223,19 @@ def make_trainer(params: argparse.Namespace) -> pl.Trainer:
         ]
 
     callbacks = [
-        ModelCheckpoint(
-            monitor="val/loss",
-            dirpath="./checkpoints",
-            filename="best",
-            auto_insert_metric_name=False,
-            mode="min",
-            save_top_k=1,
-            save_last=True,
-        )
-        if not params.no_log
-        else None,
+        (
+            ModelCheckpoint(
+                monitor="val/loss",
+                dirpath="./checkpoints",
+                filename="best",
+                auto_insert_metric_name=False,
+                mode="min",
+                save_top_k=1,
+                save_last=True,
+            )
+            if not params.no_log
+            else None
+        ),
         EarlyStopping(
             monitor="val/loss",
             patience=params.patience,

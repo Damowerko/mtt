@@ -1,10 +1,19 @@
+# IDE
+.vscode/
+
+# Project
 logs/
 data/
-data
-**/__pycache__/
-.python-version
 figures/
-.vscode/
-**/.ipynb_checkpoints/
 cluster/
-out/**
+out/
+# symlink to data
+data
+
+# fix data folder in src
+!src/**/data
+
+# Python
+.python-version
+**/__pycache__/
+**/.ipynb_checkpoints/

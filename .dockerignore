@@ -4,3 +4,4 @@ cluster/
 data/
 figures/
 models/
+!src/**/data
