@@ -26,7 +26,7 @@ RUN curl -sSL https://install.python-poetry.org | python3 - \
     && poetry config installer.max-workers 10
 
 # install torch to avoid rebuilding the image every time
-RUN pip install torch
+RUN pip install "torch==2.1.*"
 
 # install requirements
 COPY poetry.lock pyproject.toml README.md ./
