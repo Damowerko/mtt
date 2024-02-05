@@ -33,5 +33,5 @@ jobs:
         file: Dockerfile
         push: true
         tags: damowerko/mtt:latest
-        cache-from: type=registry,ref=damowerko/mtt:latest
-        cache-to: type=inline
+        cache-from: type=registry,ref=damowerko/mtt:cache
+        cache-to: type=registry,ref=damowerko/mtt:cache
