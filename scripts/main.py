@@ -218,7 +218,6 @@ def make_trainer(params: argparse.Namespace) -> pl.Trainer:
 
         # create loggers
         logger = [
-            TensorBoardLogger(save_dir="./", name="tensorboard", version=""),
             WandbLogger(**wandb_kwargs),
         ]
 
