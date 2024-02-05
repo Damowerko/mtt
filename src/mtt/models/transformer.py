@@ -428,7 +428,7 @@ class SpatialTransformer(pl.LightningModule):
         mu_split = mu.tensor_split(mu_batch_sizes)
         sigma_split = sigma.tensor_split(mu_batch_sizes)
         logp_split = existance_logp.tensor_split(mu_batch_sizes)
-        y_split = sigma.tensor_split(y_batch_sizes)
+        y_split = y.tensor_split(y_batch_sizes)
 
         with ThreadPoolExecutor() as e:
             futures = {}
