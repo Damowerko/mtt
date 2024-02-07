@@ -1,7 +1,9 @@
 import argparse
 import os
+import typing
 from functools import partial
 from glob import glob
+from pathlib import Path
 from typing import List, Union
 
 import optuna
@@ -10,9 +12,9 @@ import torch
 import wandb
 from optuna.integration.pytorch_lightning import PyTorchLightningPruningCallback
 from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
-from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.loggers.wandb import WandbLogger
 from torch.utils.data import DataLoader, random_split
+from wandb.wandb_run import Run
 
 from mtt.data.image import OnlineImageDataset, build_image_dp, collate_image_fn
 from mtt.data.tensor import TensorDataset
@@ -33,6 +35,8 @@ def main():
     group = parser.add_argument_group("General")
     group.add_argument("operation", type=str, choices=["train", "test", "study"])
     group.add_argument("--no_log", action="store_true")
+    group.add_argument("--log_dir", type=str, default="./logs")
+    group.add_argument("--data_dir", type=str, default="./data/train")
 
     # model arguments
     subparsers = parser.add_subparsers(title="Model", dest="model", required=True)
@@ -44,12 +48,11 @@ def main():
     group = parser.add_argument_group("Data")
     group.add_argument("--batch_size", type=int, default=32)
     group.add_argument("--files_per_epoch", type=int, default=1000)
-    group.add_argument("--data_dir", type=str, default="./data/train")
+    group.add_argument("--max_workers", type=int, default=16)
 
     # trainer arguments
     group = parser.add_argument_group("Trainer")
     group.add_argument("--max_epochs", type=int, default=1000)
-    group.add_argument("--gpus", type=int, default=1)
     group.add_argument("--patience", type=int, default=10)
     group.add_argument(
         "--map_location",
@@ -79,7 +82,8 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
         dataloader_kwargs = dict(
             **dataloader_kwargs,
             pin_memory=True,
-            num_workers=min(torch.multiprocessing.cpu_count(), 16),
+            num_workers=min(torch.multiprocessing.cpu_count(), params.max_workers),
+            persistent_workers=params.max_workers > 0,
         )
 
     # load dataset for specific model
@@ -187,7 +191,6 @@ def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace):
         callbacks=callbacks,
         precision=32,
         max_epochs=params.max_epochs,
-        accelerator="gpu",
         devices=1,
     )
     train(trainer, params)
@@ -202,27 +205,24 @@ def init_simulator():
     return Simulator()
 
 
-def make_trainer(params: argparse.Namespace) -> pl.Trainer:
+def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
     if params.no_log:
         logger = False
     else:
-        # resume wandb run if it exists
-        wandb_kwargs = dict(
-            project="mtt",
-            log_model=True,
-        )
-        if os.path.exists("checkpoints/best.ckpt"):
-            wandb_kwargs["resume"] = "must"
-            wandb_kwargs["version"] = glob("wandb/run-*")[0].split("-")[-1]
-            print(f"Resuming wandb run {wandb_kwargs['version']}.")
-
         # create loggers
-        logger = [
-            WandbLogger(**wandb_kwargs),
-        ]
-
-    callbacks = [
-        (
+        logger = WandbLogger(
+            project="mtt", save_dir="logs", config=params, log_model=True
+        )
+        logger.log_hyperparams(params)
+        typing.cast(Run, logger.experiment).log_code(
+            Path(__file__).parent.parent,
+            include_fn=lambda path: (
+                path.endswith(".py")
+                and "logs" not in path
+                and ("src" in path or "scripts" in path)
+            ),
+        )
+        callbacks += [
             ModelCheckpoint(
                 monitor="val/loss",
                 dirpath="./checkpoints",
@@ -232,21 +232,13 @@ def make_trainer(params: argparse.Namespace) -> pl.Trainer:
                 save_top_k=1,
                 save_last=True,
             )
-            if not params.no_log
-            else None
-        ),
-        EarlyStopping(
-            monitor="val/loss",
-            patience=params.patience,
-        ),
-    ]
-    callbacks = [c for c in callbacks if c is not None]
+        ]
+    callbacks += [EarlyStopping(monitor="val/loss", patience=params.patience)]
     return pl.Trainer(
         logger=logger,
         callbacks=callbacks,
         enable_checkpointing=not params.no_log,
         precision=32,
-        accelerator="auto",
         devices=1,
         max_epochs=params.max_epochs,
         default_root_dir=".",
