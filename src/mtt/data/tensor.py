@@ -91,15 +91,9 @@ class TensorDataset(Dataset):
         self.length = length
 
         data_path = Path(data_root)
-        self.df_targets = pd.read_parquet(data_path / "targets.parquet").set_index(
-            ["sim_idx", "step_idx"]
-        )
-        self.df_measurements = pd.read_parquet(
-            data_path / "measurements.parquet"
-        ).set_index(["sim_idx", "step_idx"])
-        self.df_sensors = pd.read_parquet(data_path / "sensors.parquet").set_index(
-            ["sim_idx", "step_idx"]
-        )
+        self.df_targets = pd.read_parquet(data_path / "targets.parquet")
+        self.df_measurements = pd.read_parquet(data_path / "measurements.parquet")
+        self.df_sensors = pd.read_parquet(data_path / "sensors.parquet")
 
         # assume that the number of steps is the same for all simulations
         self.n_steps = self.df_targets.index.get_level_values("step_idx").max() + 1
@@ -183,7 +177,10 @@ def vector_to_df(
     with ProcessPoolExecutor(nprocs) as executor:
         dfs = zip(*executor.map(parse_sim, range(len(simdata)), simdata))
         df_targets, df_measurements, df_sensors = tuple(
-            typing.cast(pd.DataFrame, pd.concat(df_list)) for df_list in dfs
+            typing.cast(pd.DataFrame, pd.concat(df_list)).set_index(
+                ["sim_idx", "step_idx"]
+            )
+            for df_list in dfs
         )
     return df_targets, df_measurements, df_sensors
 
