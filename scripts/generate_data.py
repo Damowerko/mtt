@@ -8,7 +8,7 @@ import torch
 import tqdm
 
 from mtt.data.image import OnlineImageDataset, stack_images, to_image
-from mtt.data.sim import SimGenerator, Simulator
+from mtt.data.sim import Simulator
 from mtt.data.tensor import vector_to_df
 from mtt.data.utils import parallel_rollout
 
