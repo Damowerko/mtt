@@ -7,8 +7,10 @@ import dask
 import torch
 import tqdm
 
-from mtt.data import OnlineImageDataset, generate_vectors, stack_images, vector_to_df
-from mtt.simulator import Simulator
+from mtt.data.image import OnlineImageDataset, stack_images, to_image
+from mtt.data.sim import SimGenerator, Simulator
+from mtt.data.tensor import vector_to_df
+from mtt.data.utils import parallel_rollout
 
 
 def main(args):
@@ -33,11 +35,9 @@ def main(args):
             vectors_list = pickle.load(f)
     else:
         print("Generating simulation data.")
-        # start a generator that will yeild a simulation with 119 steps (see data.py)
         vectors_list = list(
-            generate_vectors(
-                online_dataset,
-                args.n_simulations,
+            parallel_rollout(
+                online_dataset.sim_generator, n_rollouts=args.n_simulations
             )
         )
         # save the simulation data
@@ -75,7 +75,7 @@ def main(args):
                 desc="Generating images",
                 unit="image",
             ):
-                images = [online_dataset.vector_to_image(v) for v in simulation]
+                images = [to_image(v) for v in simulation]
                 with (images_dir / f"{i}.pt").open("wb") as f:
                     torch.save(stack_images(images), f)
 
