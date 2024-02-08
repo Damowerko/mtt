@@ -1,3 +1,4 @@
+import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import NamedTuple, Optional
 
@@ -373,7 +374,7 @@ class SpatialTransformer(pl.LightningModule):
         ).to(self.device)
 
         # Normalize input
-        x = self.in_norm.forward(x)
+        # x = self.in_norm.forward(x)
         # Readin
         x = self.readin.forward(x, x_batch)
         # Encoder
@@ -392,7 +393,8 @@ class SpatialTransformer(pl.LightningModule):
         object = self.readout.forward(object, x_batch)
         # Split into existence probability and state
         mu = object[..., : self.state_dim]
-        sigma = object[..., self.state_dim : 2 * self.state_dim].abs()
+        # Sigma must be > 0.0 for torch.distributions.Normal
+        sigma = object[..., self.state_dim : 2 * self.state_dim].abs().clamp(min=1e-16)
         logp = F.logsigmoid(object[..., -1])
         return STOutput(mu, sigma, logp)
 
@@ -404,6 +406,7 @@ class SpatialTransformer(pl.LightningModule):
         mu_batch_sizes: torch.Tensor,
         y: torch.Tensor,
         y_batch_sizes: torch.Tensor,
+        return_average_probability: bool = True,
     ):
         """
         Evaluate the approximate log-likelyhood of the MB following [1].
@@ -418,7 +421,7 @@ class SpatialTransformer(pl.LightningModule):
             y: (M, d) Ground truth states.
             y_batch: (B,) The size of each batch in y.
         Returns:
-            logp: Approximate log-likelyhood of the MB given the ground truth.
+            logp: Approximate log-likelyhood of the MB given the ground truth. NB: Takes average over the batch.
         """
         # need to be on CPU for tensor_split
         mu_batch_sizes = mu_batch_sizes.cpu()
@@ -459,9 +462,13 @@ class SpatialTransformer(pl.LightningModule):
 
             # add back the (1-p) of the ignored compotents
             # first get a mask for things not in the topk
-            mask = torch.ones_like(existance_logp, dtype=torch.bool)
+            mask = torch.ones_like(_existance_logp, dtype=torch.bool)
             mask[i] = False
-            logp[batch_idx] += torch.log1p(-existance_logp[mask].exp()).sum()
+            logp[batch_idx] += torch.log1p(-_existance_logp[mask].exp()).sum()
+
+        # average probability across batches
+        if return_average_probability:
+            logp = torch.logsumexp(logp, 0) - math.log(batch_size)
         return logp
 
     def training_step(self, data: TensorData, *_):
@@ -479,11 +486,10 @@ class SpatialTransformer(pl.LightningModule):
             label.y,
             label.y_batch,
         )
-
-        loss = -logp.mean()
+        loss = -logp
         self.log("train/loss", loss, batch_size=batch_size)
-        self.log("train/prob", logp.exp().mean(), prog_bar=True, batch_size=batch_size)
-        self.log("train/logp", logp.mean(), prog_bar=True, batch_size=batch_size)
+        self.log("train/prob", logp.exp(), prog_bar=True, batch_size=batch_size)
+        self.log("train/logp", logp, prog_bar=True, batch_size=batch_size)
         return loss
 
     def validation_step(self, data: TensorData, *_):
@@ -502,9 +508,9 @@ class SpatialTransformer(pl.LightningModule):
             label.y_batch,
         )
 
-        loss = -logp.mean()
+        loss = -logp
         self.log("val/loss", loss, batch_size=batch_size)
-        self.log("val/logp", logp.mean(), prog_bar=True, batch_size=batch_size)
+        self.log("val/logp", logp, prog_bar=True, batch_size=batch_size)
         return loss
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
