@@ -420,6 +420,7 @@ class SpatialTransformer(pl.LightningModule):
             mu_batch: (A,) The size of each batch in mu, cov, and logp.
             y: (M, d) Ground truth states.
             y_batch: (B,) The size of each batch in y.
+            return_average_probability: If True, return the average probability across the batch (in log-space).
         Returns:
             logp: Approximate log-likelyhood of the MB given the ground truth. NB: Takes average over the batch.
         """
