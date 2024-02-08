@@ -465,7 +465,8 @@ class SpatialTransformer(pl.LightningModule):
             # first get a mask for things not in the topk
             mask = torch.ones_like(_existance_logp, dtype=torch.bool)
             mask[i] = False
-            logp[batch_idx] += torch.log1p(-_existance_logp[mask].exp()).sum()
+            complement = 1 - _existance_logp[mask].exp()
+            logp[batch_idx] += complement.clamp(min=1e-8, max=(1 - 1e-8)).log().sum()
 
         # average probability across batches
         if return_average_probability:
