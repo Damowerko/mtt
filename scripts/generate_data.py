@@ -4,13 +4,33 @@ from functools import partial
 from pathlib import Path
 
 import dask
+import numpy as np
 import torch
 import tqdm
 
 from mtt.data.image import OnlineImageDataset, stack_images, to_image
-from mtt.data.sim import Simulator
+from mtt.data.sim import SimulationStep, Simulator
 from mtt.data.tensor import vector_to_df
 from mtt.data.utils import parallel_rollout
+
+
+def filter_simulation(
+    simulation: list[SimulationStep], window_width: int, min_window_width: int = 0
+):
+    if min_window_width:
+        # the number of measurements within each sample
+        n_measurements = [len(s.measurements) for s in simulation]
+        # the worst case number of measurements within a 20 step window
+        n_measurements_min = (
+            np.lib.stride_tricks.sliding_window_view(
+                n_measurements, window_shape=window_width
+            )
+            .sum(-1)
+            .min()
+        )
+        if n_measurements_min < min_window_width:
+            return False
+    return True
 
 
 def main(args):
