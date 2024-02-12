@@ -12,7 +12,7 @@ from scipy.optimize import linear_sum_assignment
 from torch_geometric.utils import bipartite_subgraph, subgraph
 from torchcps.attention import SpatialAttention
 
-from mtt.data.tensor import TensorData
+from mtt.data.sparse import SparseData
 from mtt.utils import add_model_specific_args, compute_ospa
 
 
@@ -318,7 +318,7 @@ class SpatialTransformer(pl.LightningModule):
             n_channels, n_decoder, pos_dim, heads, dropout
         )
 
-    def to_stinput(self, data: TensorData) -> STInput:
+    def to_stinput(self, data: SparseData) -> STInput:
         """
         The input to the model is a tuple of (x, x_pos, x_batch).
         This is how I construct STInput:
@@ -340,7 +340,7 @@ class SpatialTransformer(pl.LightningModule):
         x_batch = data.measurement_batch_sizes
         return STInput(x, x_pos, x_batch)
 
-    def to_stlabel(self, data: TensorData) -> STLabel:
+    def to_stlabel(self, data: SparseData) -> STLabel:
         y = data.target_position
         y_batch = data.target_batch_sizes
         return STLabel(y, y_batch)
@@ -475,7 +475,7 @@ class SpatialTransformer(pl.LightningModule):
             logp = torch.logsumexp(logp, 0) - math.log(batch_size)
         return logp
 
-    def training_step(self, data: TensorData, *_):
+    def training_step(self, data: SparseData, *_):
         input = self.to_stinput(data)
         label = self.to_stlabel(data)
         output = self.forward(*input)
@@ -496,7 +496,7 @@ class SpatialTransformer(pl.LightningModule):
         self.log("train/logp", logp, prog_bar=True, batch_size=batch_size)
         return loss
 
-    def validation_step(self, data: TensorData, *_):
+    def validation_step(self, data: SparseData, *_):
         input = self.to_stinput(data)
         label = self.to_stlabel(data)
         output = self.forward(*input)

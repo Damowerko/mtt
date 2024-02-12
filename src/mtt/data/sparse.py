@@ -11,7 +11,7 @@ from torch.utils.data import Dataset
 from mtt.data.sim import SimulationStep
 
 
-class TensorData(NamedTuple):
+class SparseData(NamedTuple):
     target_position: torch.Tensor
     target_time: torch.Tensor
     target_batch_sizes: torch.Tensor
@@ -48,7 +48,7 @@ class TensorData(NamedTuple):
         measurement_time = torch.full((len(measurement_position),), time)
         is_clutter = torch.cat(is_clutter, dim=0)
 
-        return TensorData(
+        return SparseData(
             target_position,
             target_time,
             torch.tensor([len(target_position)]),
@@ -60,16 +60,16 @@ class TensorData(NamedTuple):
         )
 
     @staticmethod
-    def cat(data: Iterable["TensorData"], batch=False) -> "TensorData":
+    def cat(data: Iterable["SparseData"], batch=False) -> "SparseData":
         """
-        Concatenates a list of Tensordata into a single TensorData.
+        Concatenates a list of SparseData into a single SparseData.
 
         Args:
-            data: list of TensorData to concatenate.
+            data: list of SparseData to concatenate.
             batch: If True, the batch tensor will be increased by 1 for each element in data.
         """
         # use zip to concatenate each nestedtuple of tensors
-        concatenated = TensorData(*(torch.cat(x, dim=0) for x in zip(*data)))
+        concatenated = SparseData(*(torch.cat(x, dim=0) for x in zip(*data)))
         if batch:
             return concatenated
         else:
@@ -81,10 +81,10 @@ class TensorData(NamedTuple):
             )
 
 
-class TensorDataset(Dataset):
+class SparseDataset(Dataset):
     @staticmethod
-    def collate_fn(data: Iterable[TensorData]) -> TensorData:
-        return TensorData.cat(data, batch=True)
+    def collate_fn(data: Iterable[SparseData]) -> SparseData:
+        return SparseData.cat(data, batch=True)
 
     def __init__(self, data_root: str = "./data/train", length=20) -> None:
         super().__init__()
@@ -104,11 +104,11 @@ class TensorDataset(Dataset):
         # eg. if n_steps=20 then we can only return 1 sequence of length 20
         return (self.n_steps - self.length + 1) * self.n_simulations
 
-    def __getitem__(self, index: int) -> TensorData:
+    def __getitem__(self, index: int) -> SparseData:
         sim_idx = index // (self.n_steps - self.length + 1)
         start_idx = index % (self.n_steps - self.length + 1)
 
-        data_list: list[TensorData] = []
+        data_list: list[SparseData] = []
         for step_idx in range(start_idx, start_idx + self.length):
             # get data only for current step
             idx = (sim_idx, step_idx)
@@ -151,9 +151,9 @@ class TensorDataset(Dataset):
                 sensor_position = torch.from_numpy(
                     np.stack(df_sensors["sensor_position"].to_list(), axis=0)
                 )
-            # create TensorData for current step and append
+            # create SparseData for current step and append
             data_list.append(
-                TensorData(
+                SparseData(
                     target_position.float(),
                     target_time,
                     torch.tensor([len(target_position)]),
@@ -164,7 +164,7 @@ class TensorDataset(Dataset):
                     torch.tensor([len(measurement_position)]),
                 )
             )
-        return TensorData.cat(data_list)
+        return SparseData.cat(data_list)
 
 
 def vector_to_df(

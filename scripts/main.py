@@ -17,7 +17,7 @@ from torch.utils.data import DataLoader, random_split
 from wandb.wandb_run import Run
 
 from mtt.data.image import OnlineImageDataset, build_image_dp, collate_image_fn
-from mtt.data.tensor import TensorDataset
+from mtt.data.sparse import SparseDataset
 from mtt.models.convolutional import Conv2dCoder
 from mtt.models.transformer import SpatialTransformer
 from mtt.simulator import Simulator
@@ -99,8 +99,8 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
         )
         dataloader_kwargs["collate_fn"] = collate_image_fn
     elif params.model == "st":
-        dataset = TensorDataset(params.data_dir)
-        dataloader_kwargs["collate_fn"] = TensorDataset.collate_fn
+        dataset = SparseDataset(params.data_dir)
+        dataloader_kwargs["collate_fn"] = SparseDataset.collate_fn
         train_dataset, val_dataset = random_split(
             dataset, [0.95, 0.05], generator=torch.Generator().manual_seed(42)
         )
