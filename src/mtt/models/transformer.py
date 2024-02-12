@@ -376,7 +376,7 @@ class SpatialTransformer(pl.LightningModule):
         ).to(self.device)
 
         # Normalize input
-        # x = self.in_norm.forward(x)
+        x = self.in_norm.forward(x)
         # Readin
         x = self.readin.forward(x, x_batch)
         # Encoder
