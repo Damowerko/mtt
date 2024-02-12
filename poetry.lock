@@ -5035,7 +5035,7 @@ tqdm = "4.*"
 type = "git"
 url = "https://github.com/Damowerko/torchcps"
 reference = "HEAD"
-resolved_reference = "f36b133beff4f2124af200d11d541ca0c4a03840"
+resolved_reference = "0e7c4d83ecc10e69b1f54fc3d5c2190f81dc8ed0"
 
 [[package]]
 name = "torchdata"
