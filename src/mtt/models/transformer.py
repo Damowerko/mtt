@@ -13,7 +13,7 @@ from torch_geometric.utils import bipartite_subgraph, subgraph
 from torchcps.attention import SpatialAttention
 
 from mtt.data.tensor import TensorData
-from mtt.utils import add_model_specific_args
+from mtt.utils import add_model_specific_args, compute_ospa
 
 
 class STInput(NamedTuple):
@@ -281,6 +281,7 @@ class SpatialTransformer(pl.LightningModule):
         radius: float = 10.0,
         lr: float = 1e-3,
         weight_decay: float = 0.0,
+        ospa_cutoff: float = 500.0,
         **kwargs,
     ):
         super().__init__()
@@ -289,6 +290,7 @@ class SpatialTransformer(pl.LightningModule):
         self.state_dim = state_dim
         self.lr = lr
         self.weight_decay = weight_decay
+        self.ospa_cutoff = ospa_cutoff
         # output channels for mu, sigma and probability
         self.out_channels = 2 * state_dim + 1
 
@@ -513,6 +515,16 @@ class SpatialTransformer(pl.LightningModule):
         loss = -logp
         self.log("val/loss", loss, batch_size=batch_size)
         self.log("val/logp", logp, prog_bar=True, batch_size=batch_size)
+
+        X = output.mu[output.logp.exp() > 0.5]
+        ospa = compute_ospa(
+            X.detach().cpu().numpy(),
+            label.y.detach().cpu().numpy(),
+            self.ospa_cutoff,
+            p=2,
+        )
+        self.log("val/ospa", ospa, prog_bar=True, batch_size=batch_size)
+
         return loss
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
