@@ -18,8 +18,7 @@ from wandb.wandb_run import Run
 
 from mtt.data.image import OnlineImageDataset, build_image_dp, collate_image_fn
 from mtt.data.sparse import SparseDataset
-from mtt.models.convolutional import Conv2dCoder
-from mtt.models.transformer import SpatialTransformer
+from mtt.models import KNN, Conv2dCoder, SpatialTransformer
 from mtt.simulator import Simulator
 
 models = {
