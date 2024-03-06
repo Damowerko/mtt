@@ -48,7 +48,7 @@ def main():
     group = parser.add_argument_group("Data")
     group.add_argument("--batch_size", type=int, default=32)
     group.add_argument("--files_per_epoch", type=int, default=1000)
-    group.add_argument("--max_workers", type=int, default=16)
+    group.add_argument("--num_workers", type=int, default=os.cpu_count())
 
     # trainer arguments
     group = parser.add_argument_group("Trainer")
@@ -73,7 +73,7 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
 
     # common dataloader class
     dataloader_kwargs = dict(
-        batch_size=params.batch_size,
+        batch_size=params.batch_size, num_workers=params.num_workers, pin_memory=True
     )
 
     model_cls = models[params.model]
@@ -81,13 +81,11 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
     if issubclass(model_cls, EncoderDecoder):
         # Prepare Image Dataset
         train_dataset = build_image_dp(
-            params.data_dir,
-            max_files=params.files_per_epoch,
-            map_location=params.map_location,
+            params.data_dir, max_files=params.files_per_epoch
         )
         val_dataset = get_online_dataset(
             params,
-            n_experiments=100 // dataloader_kwargs.get("n_workers", 1),
+            n_experiments=100 // dataloader_kwargs.get("num_workers", 1),
         )
 
         # collate function for images
@@ -112,7 +110,7 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
     else:
         raise ValueError(f"Unknown model: {params.model}.")
 
-    train_loader = DataLoader(train_dataset, **dataloader_kwargs)
+    train_loader = DataLoader(train_dataset, shuffle=True, **dataloader_kwargs)
     val_loader = DataLoader(val_dataset, **dataloader_kwargs)
 
     trainer.fit(model, train_loader, val_loader, ckpt_path=get_checkpoint_path())
