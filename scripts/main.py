@@ -2,7 +2,6 @@ import argparse
 import os
 import typing
 from functools import partial
-from glob import glob
 from pathlib import Path
 from typing import List, Union
 
@@ -55,6 +54,8 @@ def main():
     group = parser.add_argument_group("Trainer")
     group.add_argument("--max_epochs", type=int, default=1000)
     group.add_argument("--patience", type=int, default=10)
+    group.add_argument("--profiler", type=str, default=None)
+    group.add_argument("--fast_dev_run", action="store_true")
 
     params = parser.parse_args()
     if params.operation == "train":
@@ -242,6 +243,8 @@ def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
         devices=1,
         max_epochs=params.max_epochs,
         default_root_dir=".",
+        profiler=params.profiler,
+        fast_dev_run=params.fast_dev_run,
     )
 
 

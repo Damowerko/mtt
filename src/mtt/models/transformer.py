@@ -318,12 +318,12 @@ class SpatialTransformer(SparseBase):
             n_channels, n_decoder, pos_dim, heads, dropout
         )
 
-    def forward(
+    def _forward(
         self,
         x: torch.Tensor,
         x_pos: torch.Tensor,
         x_batch: Optional[torch.Tensor] = None,
-    ) -> STOutput:
+    ):
         """
         Args:
             x: (N, in_channels) Non-position measurement data.
@@ -368,7 +368,6 @@ class SpatialTransformer(SparseBase):
         object = self.readout.forward(object, x_batch)
         # Split into existence probability and state
         mu = object[..., : self.state_dim]
-        # Sigma must be > 0.0 for torch.distributions.Normal
-        sigma = object[..., self.state_dim : 2 * self.state_dim].abs().clamp(min=1e-16)
-        logp = F.logsigmoid(object[..., -1])
-        return STOutput(mu, sigma, logp)
+        sigma = object[..., self.state_dim : 2 * self.state_dim]
+        logits = object[..., -1]
+        return mu, sigma, logits

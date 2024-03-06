@@ -5,6 +5,7 @@ from typing import NamedTuple
 
 import pytorch_lightning as pl
 import torch
+import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
 
 from mtt.data.sparse import SparseData
@@ -73,10 +74,30 @@ class SparseBase(pl.LightningModule, ABC):
         y_batch = data.target_batch_sizes
         return SparseLabel(y, y_batch)
 
-    @abstractmethod
     def forward(
         self, x: torch.Tensor, x_pos: torch.Tensor, x_batch: torch.Tensor
     ) -> SparseOutput:
+        # apply activation to the output of _forward
+        mu, sigma, logits = self._forward(x, x_pos, x_batch)
+        # Sigma must be > 0.0 for torch.distributions.Normal
+        sigma = F.softplus(sigma) + 1e-16
+        logp = F.logsigmoid(logits)
+        return SparseOutput(mu, sigma, logp)
+
+    @abstractmethod
+    def _forward(
+        self, x: torch.Tensor, x_pos: torch.Tensor, x_batch: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Partial implementation of the forward pass.
+        Should have no activation function on the output.
+        The output of this function is used in `self.forward`.
+
+        Returns:
+            mu: (N, d) Predicted states.
+            sigma: (N, d) Covariance of the states.
+            logits: (N,) Existence probabilities in logit space.
+        """
         raise NotImplementedError()
 
     def logp(
@@ -120,10 +141,8 @@ class SparseBase(pl.LightningModule, ABC):
             for batch_idx in range(batch_size):
                 # find a matching between mu_i and y_j
                 with torch.no_grad():
-                    match_cost = (
-                        torch.cdist(mu_split[batch_idx], y_split[batch_idx], p=2)
-                        - logp_split[batch_idx][:, None]
-                    )
+                    dist = torch.cdist(mu_split[batch_idx], y_split[batch_idx], p=2)
+                    match_cost = dist - logp_split[batch_idx][:, None]
                     future = e.submit(linear_sum_assignment, match_cost.cpu().numpy())
                     futures[future] = batch_idx
 
