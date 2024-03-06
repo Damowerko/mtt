@@ -18,12 +18,14 @@ from wandb.wandb_run import Run
 
 from mtt.data.image import OnlineImageDataset, build_image_dp, collate_image_fn
 from mtt.data.sparse import SparseDataset
-from mtt.models import KNN, Conv2dCoder, SpatialTransformer
+from mtt.models import KNN, Conv2dCoder, EncoderDecoder, SpatialTransformer
+from mtt.models.sparse import SparseBase
 from mtt.simulator import Simulator
 
 models = {
     "conv2d": Conv2dCoder,
     "st": SpatialTransformer,
+    "knn": KNN,
 }
 
 
@@ -53,12 +55,6 @@ def main():
     group = parser.add_argument_group("Trainer")
     group.add_argument("--max_epochs", type=int, default=1000)
     group.add_argument("--patience", type=int, default=10)
-    group.add_argument(
-        "--map_location",
-        type=str,
-        default="cpu",
-        help="The torch device onto which data will be loaded: cpu or cuda.",
-    )
 
     params = parser.parse_args()
     if params.operation == "train":
@@ -74,19 +70,15 @@ def main():
 def train(trainer: pl.Trainer, params: argparse.Namespace):
     torch.set_float32_matmul_precision("high")
 
+    # common dataloader class
     dataloader_kwargs = dict(
         batch_size=params.batch_size,
     )
-    if params.map_location == "cpu":
-        dataloader_kwargs = dict(
-            **dataloader_kwargs,
-            pin_memory=True,
-            num_workers=min(torch.multiprocessing.cpu_count(), params.max_workers),
-            persistent_workers=params.max_workers > 0,
-        )
 
+    model_cls = models[params.model]
     # load dataset for specific model
-    if params.model == "conv2d":
+    if issubclass(model_cls, EncoderDecoder):
+        # Prepare Image Dataset
         train_dataset = build_image_dp(
             params.data_dir,
             max_files=params.files_per_epoch,
@@ -96,23 +88,32 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
             params,
             n_experiments=100 // dataloader_kwargs.get("n_workers", 1),
         )
+
+        # collate function for images
         dataloader_kwargs["collate_fn"] = collate_image_fn
-    elif params.model == "st":
+
+        # load model
+        model = model_cls(**vars(params))
+
+    elif issubclass(model_cls, SparseBase):
+        # Prepare Sparse Dataset
         dataset = SparseDataset(params.data_dir)
-        dataloader_kwargs["collate_fn"] = SparseDataset.collate_fn
         train_dataset, val_dataset = random_split(
             dataset, [0.95, 0.05], generator=torch.Generator().manual_seed(42)
         )
-        # dataset specific params
-        params.measurement_dim = 3
-        params.state_dim = 2
-        params.pos_dim = 2
+
+        # collate function for sparse data
+        dataloader_kwargs["collate_fn"] = SparseDataset.collate_fn
+
+        # load model
+        model = model_cls(measurement_dim=3, state_dim=2, pos_dim=2, **vars(params))
+
     else:
         raise ValueError(f"Unknown model: {params.model}.")
 
     train_loader = DataLoader(train_dataset, **dataloader_kwargs)
     val_loader = DataLoader(val_dataset, **dataloader_kwargs)
-    model = models[params.model](**vars(params))
+
     trainer.fit(model, train_loader, val_loader, ckpt_path=get_checkpoint_path())
 
 
