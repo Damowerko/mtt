@@ -86,9 +86,19 @@ class SparseDataset(Dataset):
     def collate_fn(data: Iterable[SparseData]) -> SparseData:
         return SparseData.cat(data, batch=True)
 
-    def __init__(self, data_root: str = "./data/train", length=20) -> None:
+    def __init__(self, data_root: str = "./data/train", length=20, slim=False) -> None:
+        """
+        Initialize the SparseDataLoader object.
+
+        Args:
+            data_root (str): The root directory of the data. Defaults to "./data/train".
+            length (int): The length of the data. Defaults to 20.
+            slim (bool): Whether to use slim mode. Defaults to False.
+                In slim mode, dataset will contain only 1 sample per simulation.
+        """
         super().__init__()
         self.length = length
+        self.slim = slim
 
         data_path = Path(data_root)
         self.df_targets = pd.read_parquet(data_path / "targets.parquet")
@@ -100,13 +110,19 @@ class SparseDataset(Dataset):
         self.n_simulations = self.df_targets.index.get_level_values("sim_idx").max() + 1
 
     def __len__(self) -> int:
+        if self.slim:
+            return self.n_simulations
         # only consider full sequences of length self.length
         # eg. if n_steps=20 then we can only return 1 sequence of length 20
         return (self.n_steps - self.length + 1) * self.n_simulations
 
     def __getitem__(self, index: int) -> SparseData:
-        sim_idx = index // (self.n_steps - self.length + 1)
-        start_idx = index % (self.n_steps - self.length + 1)
+        if self.slim:
+            sim_idx = index
+            start_idx = np.random.randint(0, self.n_steps - self.length)
+        else:
+            sim_idx = index // (self.n_steps - self.length + 1)
+            start_idx = index % (self.n_steps - self.length + 1)
 
         data_list: list[SparseData] = []
         for step_idx in range(start_idx, start_idx + self.length):

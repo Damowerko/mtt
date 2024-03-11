@@ -49,6 +49,8 @@ def main():
     group.add_argument("--batch_size", type=int, default=32)
     group.add_argument("--files_per_epoch", type=int, default=1000)
     group.add_argument("--num_workers", type=int, default=os.cpu_count())
+    group.add_argument("--input_length", type=int, default=20)
+    group.add_argument("--slim", action="store_true")
 
     # trainer arguments
     group = parser.add_argument_group("Trainer")
@@ -96,7 +98,7 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
 
     elif issubclass(model_cls, SparseBase):
         # Prepare Sparse Dataset
-        dataset = SparseDataset(params.data_dir)
+        dataset = SparseDataset(params.data_dir, params.input_length, params.slim)
         train_dataset, val_dataset = random_split(
             dataset, [0.95, 0.05], generator=torch.Generator().manual_seed(42)
         )
