@@ -115,7 +115,7 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
     train_loader = DataLoader(train_dataset, shuffle=True, **dataloader_kwargs)
     val_loader = DataLoader(val_dataset, **dataloader_kwargs)
 
-    trainer.fit(model, train_loader, val_loader, ckpt_path=get_checkpoint_path())
+    trainer.fit(model, train_loader, val_loader)
 
 
 def test(trainer: pl.Trainer, params: argparse.Namespace):
@@ -129,7 +129,7 @@ def test(trainer: pl.Trainer, params: argparse.Namespace):
     )
     trainer = make_trainer(params)
     model = Conv2dCoder(**vars(params))
-    trainer.test(model, test_loader, ckpt_path=get_checkpoint_path())
+    trainer.test(model, test_loader)
 
 
 def study(params: argparse.Namespace):
@@ -246,11 +246,6 @@ def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
         profiler=params.profiler,
         fast_dev_run=params.fast_dev_run,
     )
-
-
-def get_checkpoint_path() -> Union[str, None]:
-    ckpt_path = "./checkpoints/best.ckpt"
-    return ckpt_path if os.path.exists(ckpt_path) else None
 
 
 def get_online_dataset(params: argparse.Namespace, n_experiments=1, n_steps=100):
