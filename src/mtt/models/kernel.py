@@ -50,4 +50,5 @@ class KNN(SparseBase):
         mu = y_mixture.positions
         sigma = y_mixture.weights[:, :-1]
         logits = y_mixture.weights[:, -1]
-        return mu, sigma, logits
+        batch = y_mixture.batch
+        return mu, sigma, logits, batch

@@ -22,6 +22,7 @@ class SparseOutput(NamedTuple):
     mu: torch.Tensor
     sigma: torch.Tensor
     logp: torch.Tensor
+    batch: torch.Tensor
 
 
 class SparseLabel(NamedTuple):
@@ -78,16 +79,16 @@ class SparseBase(pl.LightningModule, ABC):
         self, x: torch.Tensor, x_pos: torch.Tensor, x_batch: torch.Tensor
     ) -> SparseOutput:
         # apply activation to the output of _forward
-        mu, sigma, logits = self._forward(x, x_pos, x_batch)
+        mu, sigma, logits, batch = self._forward(x, x_pos, x_batch)
         # Sigma must be > 0.0 for torch.distributions.Normal
         sigma = F.softplus(sigma) + 1e-16
         logp = F.logsigmoid(logits)
-        return SparseOutput(mu, sigma, logp)
+        return SparseOutput(mu, sigma, logp, batch)
 
     @abstractmethod
     def _forward(
         self, x: torch.Tensor, x_pos: torch.Tensor, x_batch: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Partial implementation of the forward pass.
         Should have no activation function on the output.
@@ -97,6 +98,7 @@ class SparseBase(pl.LightningModule, ABC):
             mu: (N, d) Predicted states.
             sigma: (N, d) Covariance of the states.
             logits: (N,) Existence probabilities in logit space.
+            batch: (B,) The size of each batch in mu, cov, and logp.
         """
         raise NotImplementedError()
 
@@ -105,7 +107,7 @@ class SparseBase(pl.LightningModule, ABC):
         mu: torch.Tensor,
         sigma: torch.Tensor,
         existance_logp: torch.Tensor,
-        mu_batch_sizes: torch.Tensor,
+        x_batch_sizes: torch.Tensor,
         y: torch.Tensor,
         y_batch_sizes: torch.Tensor,
         return_average_probability: bool = True,
@@ -126,17 +128,19 @@ class SparseBase(pl.LightningModule, ABC):
         Returns:
             logp: Approximate log-likelyhood of the MB given the ground truth. NB: Takes average over the batch.
         """
-        # need to be on CPU for tensor_split
-        mu_batch_sizes = mu_batch_sizes.cpu()
-        y_batch_sizes = y_batch_sizes.cpu()
+        batch_size = x_batch_sizes.shape[0]
+        # tensor_split expects indices at which to split tensor
+        # they must be on the CPU
+        x_split_idx = x_batch_sizes.cumsum(0)[:-1].cpu()
+        y_split_idx = y_batch_sizes.cumsum(0)[:-1].cpu()
 
-        batch_size = mu_batch_sizes.shape[0]
-        mu_split = mu.tensor_split(mu_batch_sizes)
-        sigma_split = sigma.tensor_split(mu_batch_sizes)
-        logp_split = existance_logp.tensor_split(mu_batch_sizes)
-        y_split = y.tensor_split(y_batch_sizes)
+        mu_split = mu.tensor_split(x_split_idx)
+        sigma_split = sigma.tensor_split(x_split_idx)
+        logp_split = existance_logp.tensor_split(x_split_idx)
+        y_split = y.tensor_split(y_split_idx)
 
         with ThreadPoolExecutor() as e:
+            # map (i,j) -> batch_idx
             futures = {}
             for batch_idx in range(batch_size):
                 # find a matching between mu_i and y_j
@@ -147,7 +151,7 @@ class SparseBase(pl.LightningModule, ABC):
                     futures[future] = batch_idx
 
         logp = torch.zeros((batch_size,), device=self.device)
-        for future in as_completed(futures):
+        for future in as_completed(futures.keys()):
             batch_idx = futures[future]
             i, j = future.result()
 
@@ -155,6 +159,10 @@ class SparseBase(pl.LightningModule, ABC):
             _sigma = sigma_split[batch_idx]
             _existance_logp = logp_split[batch_idx]
             _y = y_split[batch_idx]
+
+            assert _mu.shape[0] == x_batch_sizes[batch_idx]
+            assert _y.shape[0] == y_batch_sizes[batch_idx]
+            assert i.shape[0] == _y.shape[0]
 
             dist = torch.distributions.Normal(_mu[i], _sigma[i])
             logp[batch_idx] = torch.sum(
@@ -166,7 +174,7 @@ class SparseBase(pl.LightningModule, ABC):
             mask = torch.ones_like(_existance_logp, dtype=torch.bool)
             mask[i] = False
             complement = 1 - _existance_logp[mask].exp()
-            logp[batch_idx] += complement.clamp(min=1e-8, max=(1 - 1e-8)).log().sum()
+            logp[batch_idx] += complement.clamp(min=1e-16, max=(1 - 1e-16)).log().sum()
 
         # average probability across batches
         if return_average_probability:
@@ -184,7 +192,7 @@ class SparseBase(pl.LightningModule, ABC):
             output.mu,
             output.sigma,
             output.logp,
-            input.x_batch,
+            output.batch,
             label.y,
             label.y_batch,
         )
