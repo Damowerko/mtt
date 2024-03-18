@@ -334,17 +334,17 @@ class SpatialTransformer(SparseBase):
         """
         # convert batch sizes to indices in {1,...,B}^N
         if x_batch is not None:
-            x_batch = torch.repeat_interleave(
+            batch_idx = torch.repeat_interleave(
                 torch.arange(x_batch.shape[0], device=self.device), x_batch
             )
         else:
-            x_batch = torch.zeros((x.shape[0],), dtype=torch.long, device=self.device)
+            batch_idx = torch.zeros((x.shape[0],), dtype=torch.long, device=self.device)
 
         # create graph based on positions
         edge_index = gnn.radius_graph(
             x_pos,
             r=self.radius,
-            batch=x_batch,
+            batch=batch_idx,
             loop=True,
         ).to(self.device)
 
@@ -370,4 +370,4 @@ class SpatialTransformer(SparseBase):
         mu = object[..., : self.state_dim]
         sigma = object[..., self.state_dim : 2 * self.state_dim]
         logits = object[..., -1]
-        return mu, sigma, logits
+        return mu, sigma, logits, x_batch
