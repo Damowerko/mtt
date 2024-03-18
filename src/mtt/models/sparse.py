@@ -162,7 +162,7 @@ class SparseBase(pl.LightningModule, ABC):
 
             assert _mu.shape[0] == x_batch_sizes[batch_idx]
             assert _y.shape[0] == y_batch_sizes[batch_idx]
-            assert i.shape[0] == _y.shape[0]
+            assert i.shape[0] == min(_mu.shape[0], _y.shape[0])
 
             dist = torch.distributions.Normal(_mu[i], _sigma[i])
             logp[batch_idx] = torch.sum(
