@@ -22,7 +22,7 @@ class KNN(SparseBase):
         n_layers: int = 4,
         n_layers_mlp: int = 2,
         hidden_channels_mlp: int = 128,
-        sigma: float | typing.Sequence[float] = 1.0,
+        sigma: float = 1.0,
         max_filter_kernels: int = 32,
         update_positions: bool = True,
         alpha: float | None = None,
