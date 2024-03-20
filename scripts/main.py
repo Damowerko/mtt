@@ -246,7 +246,7 @@ def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
         default_root_dir=".",
         profiler=params.profiler,
         fast_dev_run=params.fast_dev_run,
-            log_every_n_steps=1 if params.slim else 50,
+        log_every_n_steps=1 if params.slim else 50,
     )
 
 
