@@ -12,3 +12,14 @@ Multi target tracking with a fully convolutional encoder-decoder.
 `poetry config virtualenvs.create false --local`
 
 3. `poetry install` and all pip packages will install. This might take a while (up to ~10 minutes). If it's taking long it might also be a networking issue (sometimes pypi.org resolves to an IPv6 address, which may cause problems, try seeing if `pip install numpy` fails).
+
+## Models
+
+Model weights are available on my [Google Drive](), since they are too large for `git-lfs`. Download the contents of the `models` directory and place them in the `models` directory.
+
+Alternatively, you can download them using `gdown`.
+
+```
+gdown --folder --id 17jW5YQpbT6i6gV2smHl69ezC5P8VhjAj
+mv mtt-models/ models/
+```

@@ -7,7 +7,6 @@ data/
 figures/
 cluster/
 out/
-models/
 # symlink to data
 data
 
