@@ -23,6 +23,7 @@ torchdata = "^0.7.1"
 dask = {extras = ["complete", "distributed", "dataframe"], version = "^2023.11.0"}
 fastavro = "^1.9.0"
 fastparquet = "^2023.10.1"
+optuna-integration = "^3.6.0"
 
 [tool.poetry.group.dev.dependencies]
 black = "^22.8.0"

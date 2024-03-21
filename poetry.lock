@@ -3016,6 +3016,26 @@ packaging = "*"
 scikit-learn = "*"
 
 [[package]]
+name = "optuna-integration"
+version = "3.6.0"
+description = "Integration libraries of Optuna."
+optional = false
+python-versions = "*"
+files = [
+    {file = "optuna-integration-3.6.0.tar.gz", hash = "sha256:f261c38586b22cd95639287ca694fc0f788482cfbb7bb83803caf404ce06a55a"},
+    {file = "optuna_integration-3.6.0-py3-none-any.whl", hash = "sha256:e281d4902ab728b4c86a997eb01e7bc54d921ae7cff40ed8f4e083f49d37e033"},
+]
+
+[package.dependencies]
+optuna = "*"
+
+[package.extras]
+all = ["botorch (<0.10.0)", "catalyst", "catboost (>=0.26)", "catboost (>=0.26,<1.2)", "cma", "distributed", "fastai", "gpytorch", "lightgbm", "lightning", "mlflow", "mxnet", "pandas", "pytorch-ignite", "scikit-learn (>=0.24.2)", "scikit-optimize", "scipy (>=1.9.2)", "shap", "skorch", "tensorboard", "tensorflow", "torch", "wandb", "xgboost"]
+checking = ["black", "blackdoc", "hacking", "isort", "mypy", "types-PyYAML", "types-redis", "types-setuptools", "typing-extensions (>=3.10.0.0)"]
+document = ["cma", "mlflow", "pandas", "scikit-learn (>=0.24.2)", "scipy (>=1.9.2)", "sphinx", "sphinx-rtd-theme"]
+test = ["coverage", "fakeredis[lua]", "pytest"]
+
+[[package]]
 name = "overrides"
 version = "7.7.0"
 description = "A decorator to automatically detect mismatch when overriding a method."
@@ -5479,4 +5499,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.12"
-content-hash = "536baaa27506fcd0eab164ef2796868fd335b7bc394a01c1f345a5eecc1feb19"
+content-hash = "91b70cd64ffac961d1775441f5f1144ddcd9c8d7fd0c23c446cec6b1614be488"
