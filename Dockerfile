@@ -10,3 +10,4 @@ RUN poetry install --no-root
 
 # copy the rest of the repository
 COPY . .
+RUN poetry install --only-root
