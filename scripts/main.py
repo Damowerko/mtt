@@ -76,7 +76,11 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
 
     # common dataloader class
     dataloader_kwargs = dict(
-        batch_size=params.batch_size, num_workers=params.num_workers, pin_memory=True
+        batch_size=params.batch_size,
+        num_workers=params.num_workers,
+        pin_memory=True,
+        drop_last=True,
+        persistent_workers=True,
     )
 
     model_cls = models[params.model]
