@@ -47,41 +47,14 @@ def collate_image_fn(data: Iterable[StackedImageData]) -> StackedImageBatch:
     )
 
 
-# def build_vector_to_image_dp(
-#     data_path: str, vector_to_image_kwargs: Dict = {}, unbatch=True
-# ):
-#     """
-#     Build a datapipe that loads in VectorData instead of StackedImageData.
-#     It will convert the VectorData into ImageData and then into StackedImageData.
-#     """
-#     with open(data_path, "rb") as f:
-#         simulations: List[List[SimulationStep]] = pickle.load(f)
-#     datapipe = (
-#         dp.map.SequenceWrapper(simulations)
-#         .to_iter_datapipe()
-#         .set_length(len(simulations))
-#         .sharding_filter()
-#         .map(partial(_transform_simulation, **vector_to_image_kwargs))
-#         .map(partial(rolling_window, length=20))
-#     )
-#     if unbatch:
-#         return datapipe.unbatch()
-#     return datapipe
-
-
 def stack_images(data: Iterable[ImageData]) -> StackedImageData:
     """
-    Stack the images from a list of StackedImageData into a single StackedImageBatch.
+    Stack the images from a list of ImageData into a single StackedImageData.
     """
     sensor_imgs, position_imgs, infos = zip(*data)
     return StackedImageData(
         torch.stack(sensor_imgs), torch.stack(position_imgs), list(infos)  # type: ignore
     )
-
-
-def _transform_simulation(simulation_vectors: List[SimulationStep], **kwargs):
-    simulation_images = [to_image(v, **kwargs) for v in simulation_vectors]
-    return stack_images(simulation_images)
 
 
 def build_image_dp(
@@ -198,7 +171,7 @@ class OnlineImageDataset(IterableDataset):
                 position_imgs.append(position_img)
                 infos.append(info)
                 if len(sensor_imgs) == self.length:
-                    yield (
+                    yield StackedImageData(
                         torch.stack(tuple(sensor_imgs)),
                         torch.stack(tuple(position_imgs)),
                         list(infos),
@@ -206,7 +179,7 @@ class OnlineImageDataset(IterableDataset):
         else:
             sensor_imgs, position_imgs, infos = stack_images(list(images))
             for i in range(len(sensor_imgs) - self.length + 1):
-                yield (
+                yield StackedImageData(
                     sensor_imgs[i : i + self.length],
                     position_imgs[i : i + self.length],
                     infos[i : i + self.length],
