@@ -89,6 +89,7 @@ class SimGenerator(Iterable[SimulationStep]):
         """
         simulator = simulator or self.init_simulator()
         for _ in range(self.n_steps):
+            simulator.update()
             # Implementation of iter_experiments goes here
             target_positions = simulator.positions[
                 (np.abs(simulator.positions) <= simulator.window_width / 2).all(axis=1)
