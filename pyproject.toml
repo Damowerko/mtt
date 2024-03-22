@@ -31,6 +31,7 @@ jupyter = "^1.0.0"
 ipympl = "^0.8.7"
 pytest = "^7.2.0"
 plotly = "^5.13.1"
+imageio = {extras = ["ffmpeg"], version = "^2.34.0"}
 
 [[tool.poetry.source]]
 name = "PyPI"
