@@ -6,10 +6,10 @@ import numpy.typing as npt
 import torch
 from numpy.typing import NDArray
 
+from mtt.lmco_types import CNNFilter
 from mtt.models.convolutional import EncoderDecoder
 from mtt.peaks import find_peaks
 from mtt.sensor import Sensor, measurement_image
-from mtt.types import CNNFilter
 from mtt.utils import to_cartesian
 
 
