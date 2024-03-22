@@ -5,37 +5,37 @@ import imageio.v3 as iio
 import matplotlib.pyplot as plt
 import numpy as np
 
-from mtt.data import OnlineImageDataset
+from mtt.data.image import OnlineImageDataset, StackedImageData
 from mtt.simulator import Simulator
 
 rng = np.random.default_rng()
 
 
-def plot_mtt(sensor_imgs, position_imgs, info):
-    sensor_img = sensor_imgs[-1]
-    position_img = position_imgs[-1]
-    target_positions = info[-1]["target_positions"]
-    sensor_positions = info[-1]["sensor_positions"]
-    measurements = np.concatenate(info[-1]["measurements"])
-    clutter = np.concatenate(info[-1]["clutter"])
-
-    width = info[-1]["window"]
+def plot_mtt(sensor_img, target_img, info, estimates=None, plot_measurements=False):
+    target_positions = info["target_positions"]
+    sensor_positions = info["sensor_positions"]
+    measurements = np.concatenate(info["measurements"])
+    clutter = np.concatenate(info["clutter"])
+    width = info["window"]
     extent = (-width / 2, width / 2, -width / 2, width / 2)
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
     for i in range(len(ax)):
-        ax[i].plot(*target_positions.T, "r.")
-        ax[i].plot(*sensor_positions.T, "b.")
-        # ax[i].plot(*measurements.T, "bx")
-        ax[i].plot(*clutter.T, "y1")
+        ax[i].plot(*sensor_positions.T, "b.", label="Sensor")
+        ax[i].plot(*target_positions.T, "r1", label="Target")
+        if estimates is not None:
+            ax[i].plot(*estimates.T, "g.", label="Estimate")
+        if plot_measurements:
+            ax[i].plot(*measurements.T, "bx", label="Sensor Measurement")
+        if i == 0:
+            ax[i].plot(*clutter.T, "y1", label="Clutter")
 
     ax[0].set_title("Sensor Image")
     ax[0].imshow(sensor_img, extent=extent, origin="lower", cmap="gray_r")
 
     ax[1].set_title("Output Image")
-    ax[1].imshow(position_img, extent=extent, origin="lower", cmap="gray_r")
+    ax[1].imshow(target_img, extent=extent, origin="lower", cmap="gray_r")
     ax[1].legend(
-        ["Target", "Sensor", "Sensor Measurement"],
         loc="center left",
         bbox_to_anchor=(1, 0.5),
     )
@@ -48,8 +48,8 @@ if __name__ == "__main__":
     dataset = OnlineImageDataset(init_simulator=init_simulator, n_steps=100)
     data = list(dataset)
 
-    def draw_frame(data):
-        fig = plot_mtt(*data)
+    def draw_frame(data: StackedImageData):
+        fig = plot_mtt(data.sensor_images[-1], data.target_images[-1], data.info[-1])
         buf = BytesIO()
         fig.savefig(buf, format="png")
         buf.seek(0)
