@@ -213,7 +213,7 @@ class SparseBase(pl.LightningModule, ABC):
             output.mu,
             output.sigma,
             output.logp,
-            input.x_batch,
+            output.batch,
             label.y,
             label.y_batch,
         )

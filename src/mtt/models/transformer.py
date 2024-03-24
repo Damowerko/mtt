@@ -280,17 +280,16 @@ class SpatialTransformer(SparseBase):
         heads: int = 1,
         dropout: float = 0.0,
         radius: float = 10.0,
+        max_neighbors: int = 64,
+        selection_threshold: float = 0.5,
         **kwargs,
     ):
-        super().__init__(
-            measurement_dim=measurement_dim,
-            state_dim=state_dim,
-            pos_dim=pos_dim,
-            **kwargs,
-        )
+        super().__init__(**kwargs)
         self.save_hyperparameters()
         self.radius = radius
         self.state_dim = state_dim
+        self.max_neighbors = max_neighbors
+        self.selection_threshold = selection_threshold
         # output channels for mu, sigma and probability
         self.out_channels = 2 * state_dim + 1
 
@@ -313,6 +312,14 @@ class SpatialTransformer(SparseBase):
         )
         self.encoder = SpatialTransformerEncoder(
             n_channels, n_encoder, pos_dim, heads, dropout
+        )
+        self.selection = SelectionMechanism(
+            n_channels,
+            n_channels,
+            n_channels * heads,
+            n_encoder,
+            0.5,
+            dropout,
         )
         self.decoder = SpatialTransformerDecoder(
             n_channels, n_decoder, pos_dim, heads, dropout
@@ -340,30 +347,27 @@ class SpatialTransformer(SparseBase):
         else:
             batch_idx = torch.zeros((x.shape[0],), dtype=torch.long, device=self.device)
 
-        # create graph based on positions
-        edge_index = gnn.radius_graph(
-            x_pos,
-            r=self.radius,
-            batch=batch_idx,
-            loop=True,
-        ).to(self.device)
-
         # Normalize input
         x = self.in_norm.forward(x)
         # Readin
         x = self.readin.forward(x, x_batch)
         # Encoder
+        edge_index = self._build_graph(x_pos, batch_idx)
         encoding = self.encoder.forward(x, x_pos, edge_index)
+
+        # Selection Mechanism
+        x, object, mask = self.selection.forward(x, encoding, batch_idx)
+        x_batch = batch_idx[mask].bincount()
+
         # Decoder
-        # at the moment we just use all encodings as the object queries
-        object = encoding  # TODO: Selection mechanism
         object = self.decoder.forward(
             encoding,
             object,
             x_pos,
-            mask=torch.ones((x.shape[0],), dtype=torch.bool, device=self.device),
+            mask=mask,
             edge_index=edge_index,
         )
+
         # Readout
         object = self.readout.forward(object, x_batch)
         # Split into existence probability and state
@@ -371,3 +375,12 @@ class SpatialTransformer(SparseBase):
         sigma = object[..., self.state_dim : 2 * self.state_dim]
         logits = object[..., -1]
         return mu, sigma, logits, x_batch
+
+    def _build_graph(self, x_pos, batch_idx):
+        return gnn.radius_graph(
+            x_pos,
+            r=self.radius,
+            max_num_neighbors=self.max_neighbors,
+            batch=batch_idx,
+            loop=True,
+        ).to(self.device)
