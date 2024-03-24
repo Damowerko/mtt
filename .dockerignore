@@ -1,8 +1,14 @@
 .pytest_cache/
 .vscode/
 cluster/
-data/
 figures/
-models/
 logs/
+
+# data, it's symlink, but allow folders called data in src */
+data/
+data
 !src/**/data
+
+# models
+models/
+!src/**/models
