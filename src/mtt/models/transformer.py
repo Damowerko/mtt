@@ -371,7 +371,7 @@ class SpatialTransformer(SparseBase):
         # Readout
         object = self.readout.forward(object, x_batch)
         # Split into existence probability and state
-        mu = object[..., : self.state_dim]
+        mu = x_pos[mask] + object[..., : self.state_dim]
         sigma = object[..., self.state_dim : 2 * self.state_dim]
         logits = object[..., -1]
         return mu, sigma, logits, x_batch
