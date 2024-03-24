@@ -1,18 +1,13 @@
 # IDE
 .vscode/
 
-# Project
-logs/
-data/
-figures/
-cluster/
-out/
-models/
-# symlink to data
-data
-
-# fix data folder in src
-!src/**/data
+# Project Top Level
+/logs
+/data
+/figures
+/cluster
+/out
+/models
 
 # Python
 .python-version
