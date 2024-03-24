@@ -11,7 +11,14 @@ from mtt.simulator import Simulator
 rng = np.random.default_rng()
 
 
-def plot_mtt(sensor_img, target_img, info, estimates=None, plot_measurements=False):
+def plot_mtt(
+    sensor_img,
+    target_img,
+    info,
+    estimates=None,
+    plot_measurements=False,
+    plot_clutter=False,
+):
     target_positions = info["target_positions"]
     sensor_positions = info["sensor_positions"]
     measurements = np.concatenate(info["measurements"])
@@ -21,24 +28,29 @@ def plot_mtt(sensor_img, target_img, info, estimates=None, plot_measurements=Fal
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
     for i in range(len(ax)):
-        ax[i].plot(*sensor_positions.T, "b.", label="Sensor")
-        ax[i].plot(*target_positions.T, "r1", label="Target")
-        if estimates is not None:
-            ax[i].plot(*estimates.T, "g.", label="Estimate")
-        if plot_measurements:
-            ax[i].plot(*measurements.T, "bx", label="Sensor Measurement")
+        # on both plots
+        ax[i].plot(*target_positions.T, "r.", label="Target")
+        # on the first plot
         if i == 0:
-            ax[i].plot(*clutter.T, "y1", label="Clutter")
+            ax[i].plot(*sensor_positions.T, "go", label="Sensor")
+            if plot_measurements:
+                ax[i].plot(*measurements.T, "bx", label="Sensor Measurement")
+            if plot_clutter:
+                ax[i].plot(*clutter.T, "y1", label="Clutter")
+        # on the second plot
+        if i == 1:
+            if estimates is not None:
+                ax[i].plot(*estimates.T, "b.", label="Estimate")
 
     ax[0].set_title("Sensor Image")
     ax[0].imshow(sensor_img, extent=extent, origin="lower", cmap="gray_r")
 
     ax[1].set_title("Output Image")
     ax[1].imshow(target_img, extent=extent, origin="lower", cmap="gray_r")
-    ax[1].legend(
-        loc="center left",
-        bbox_to_anchor=(1, 0.5),
-    )
+    # ax[1].legend(
+    #     loc="center left",
+    #     bbox_to_anchor=(1, 0.5),
+    # )
     plt.tight_layout()
     return fig
 
