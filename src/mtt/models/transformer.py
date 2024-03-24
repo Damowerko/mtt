@@ -370,9 +370,11 @@ class SpatialTransformer(SparseBase):
 
         # Readout
         object = self.readout.forward(object, x_batch)
-        # Split into existence probability and state
+        assert x_pos.shape[-1] == self.state_dim
+        # object output is mu relative to x_pos for shift-equivariance
         mu = x_pos[mask] + object[..., : self.state_dim]
         sigma = object[..., self.state_dim : 2 * self.state_dim]
+        # existence probability logit
         logits = object[..., -1]
         return mu, sigma, logits, x_batch
 
