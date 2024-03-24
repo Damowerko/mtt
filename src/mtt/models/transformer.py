@@ -314,8 +314,8 @@ class SpatialTransformer(SparseBase):
             n_channels, n_encoder, pos_dim, heads, dropout
         )
         self.selection = SelectionMechanism(
-            n_channels,
-            n_channels,
+            n_channels * heads,
+            n_channels * heads,
             n_channels * heads,
             n_encoder,
             0.5,
