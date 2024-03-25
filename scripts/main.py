@@ -30,7 +30,7 @@ models = {
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(conflict_handler="resolve")
     parser.add_argument("operation", type=str, choices=["train", "test", "study"])
     parser.add_argument("model", type=str, choices=models.keys())
 
