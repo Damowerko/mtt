@@ -7,7 +7,7 @@ import yaml
 from mtt.models import EncoderDecoder, SparseBase
 
 
-def load_model(uri: str) -> Tuple[SparseBase | EncoderDecoder, str]:
+def load_model(uri: str) -> Tuple[SparseBase | EncoderDecoder, str, dict]:
     """Load a model from a uri.
 
     Args:
@@ -51,4 +51,4 @@ def load_model(uri: str) -> Tuple[SparseBase | EncoderDecoder, str]:
             model = model_class.load_from_checkpoint(uri)
         except RuntimeError:
             model = model_class.load_from_checkpoint(uri, deprecated_api=True)
-        return model, name
+        return model, name, params
