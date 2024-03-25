@@ -4,7 +4,8 @@ from typing import Tuple
 
 import yaml
 
-from mtt.models import EncoderDecoder, SparseBase
+from mtt.models.convolutional import EncoderDecoder
+from mtt.models.sparse import SparseBase
 
 
 def load_model(uri: str) -> Tuple[SparseBase | EncoderDecoder, str, dict]:
@@ -34,21 +35,27 @@ def load_model(uri: str) -> Tuple[SparseBase | EncoderDecoder, str, dict]:
             name = path.stem
             params = yaml.safe_load(path.with_suffix(".yaml").read_text())
 
-        if params.get("model") == "conv2d":
-            from mtt.models import Conv2dCoder
-
-            model_class = Conv2dCoder
-        elif params.get("model") == "st":
-            from mtt.models import SpatialTransformer
-
-            model_class = SpatialTransformer
-        elif params.get("model") == "knn":
-            from mtt.models import KNN
-
-            model_class = KNN
+        model_class = get_model_class(params["model"])
 
         try:
             model = model_class.load_from_checkpoint(uri)
         except RuntimeError:
             model = model_class.load_from_checkpoint(uri, deprecated_api=True)
         return model, name, params
+
+
+def get_model_class(name: str):
+    if name == "conv2d":
+        from mtt.models.convolutional import Conv2dCoder
+
+        return Conv2dCoder
+    elif name == "st":
+        from mtt.models.transformer import SpatialTransformer
+
+        return SpatialTransformer
+    elif name == "knn":
+        from mtt.models.kernel import KNN
+
+        return KNN
+    else:
+        raise ValueError(f"Unknown model: {name}.")
