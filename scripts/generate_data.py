@@ -54,10 +54,15 @@ def main(args):
         with (out_dir / "simulations.pkl").open("rb") as f:
             vectors_list = pickle.load(f)
     else:
-        print("Generating simulation data.")
         vectors_list = list(
-            parallel_rollout(
-                online_dataset.sim_generator, n_rollouts=args.n_simulations
+            tqdm.tqdm(
+                parallel_rollout(
+                    online_dataset.sim_generator,
+                    n_rollouts=args.n_simulations,
+                ),
+                total=args.n_simulations,
+                desc="Generating simulation data",
+                unit="simulation",
             )
         )
         # save the simulation data
@@ -117,6 +122,5 @@ if __name__ == "__main__":
         action="store_true",
         help="Don't generate images. Only save the simulation data.",
     )
-    parser.add_argument("--sims-per-file", type=int, default=1000)
     args = parser.parse_args()
     main(args)

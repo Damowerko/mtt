@@ -189,12 +189,11 @@ class SparseDataset(Dataset):
 
 def vector_to_df(
     simdata: List[List[SimulationStep]],
-    nprocs: int = 32,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Convert VectorData into pandas DataFrames. Will use dask to parallelize the conversion.
+    Convert VectorData into pandas DataFrames. Willl use a ProcessPoolExecutor to parallelize the conversion.
     """
-    with ProcessPoolExecutor(nprocs) as executor:
+    with ProcessPoolExecutor() as executor:
         dfs = zip(*executor.map(parse_sim, range(len(simdata)), simdata))
         df_targets, df_measurements, df_sensors = tuple(
             typing.cast(pd.DataFrame, pd.concat(df_list)).set_index(

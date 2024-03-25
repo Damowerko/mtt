@@ -33,7 +33,8 @@ def rolling_window(
 
 
 def parallel_rollout(
-    iterable: Iterable[T], n_rollouts=10, max_workers=None
+    iterable: Iterable[T],
+    n_rollouts=10,
 ) -> Iterable[List[T]]:
     """
     Uses a ProcessPoolExecutor to generate n_rollouts in parallel.
@@ -46,7 +47,7 @@ def parallel_rollout(
     """
 
     futures = []
-    with ProcessPoolExecutor(max_workers) as e:
+    with ProcessPoolExecutor() as e:
         for _ in range(n_rollouts):
             futures += [e.submit(list, iterable)]
     for f in as_completed(futures):
