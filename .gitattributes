@@ -1,1 +1,1 @@
-models/*.ckpt filter=jupyter-notebook
+*.ipynb filter=jupyter-notebook
