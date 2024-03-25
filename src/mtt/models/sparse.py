@@ -90,9 +90,13 @@ class SparseBase(pl.LightningModule, ABC):
 
         # to compute the number of elements in each batch after the mast
         # first convert to a batch index, mask, and then count the number of elements
-        y_batch = torch.repeat_interleave(
-            torch.arange(data.target_batch_sizes.shape[0]), data.target_batch_sizes
-        )[mask].bincount(minlength=data.target_batch_sizes.shape[0])
+        batch_idx = torch.repeat_interleave(
+            torch.arange(
+                data.target_batch_sizes.shape[0], device=data.target_batch_sizes.device
+            ),
+            data.target_batch_sizes,
+        )
+        y_batch = batch_idx[mask].bincount(minlength=data.target_batch_sizes.shape[0])
         assert y_batch.shape == data.target_batch_sizes.shape
 
         return SparseLabel(y, y_batch)
