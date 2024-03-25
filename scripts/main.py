@@ -18,21 +18,15 @@ from wandb.wandb_run import Run
 
 from mtt.data.image import OnlineImageDataset, build_image_dp, collate_image_fn
 from mtt.data.sparse import SparseDataset
-from mtt.models import KNN, Conv2dCoder, EncoderDecoder, SpatialTransformer
+from mtt.models.convolutional import EncoderDecoder
 from mtt.models.sparse import SparseBase
 from mtt.simulator import Simulator
-
-models = {
-    "conv2d": Conv2dCoder,
-    "st": SpatialTransformer,
-    "knn": KNN,
-}
 
 
 def main():
     parser = argparse.ArgumentParser(conflict_handler="resolve")
     parser.add_argument("operation", type=str, choices=["train", "test", "study"])
-    parser.add_argument("model", type=str, choices=models.keys())
+    parser.add_argument("model", type=str, choices=["conv2d", "st", "knn"])
 
     # program arguments
     group = parser.add_argument_group("General")
@@ -43,7 +37,7 @@ def main():
     # model arguments
     model_name = sys.argv[2]
     group = parser.add_argument_group("Model Hyperparameters")
-    models[model_name].add_model_specific_args(group)
+    get_model_cls(sys.argv[2]).add_model_specific_args(group)
 
     # data arguments
     group = parser.add_argument_group("Data")
@@ -83,7 +77,7 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
         persistent_workers=True,
     )
 
-    model_cls = models[params.model]
+    model_cls = get_model_cls(params.model)
     # load dataset for specific model
     if issubclass(model_cls, EncoderDecoder):
         # Prepare Image Dataset
@@ -115,7 +109,9 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
         model = model_cls(measurement_dim=3, state_dim=2, pos_dim=2, **vars(params))
 
     else:
-        raise ValueError(f"Unknown model: {params.model}.")
+        raise RuntimeError(
+            f"{params.model} is neither a convolutional nor sparse model."
+        )
 
     train_loader = DataLoader(train_dataset, shuffle=True, **dataloader_kwargs)
     val_loader = DataLoader(val_dataset, **dataloader_kwargs)
@@ -133,7 +129,7 @@ def test(trainer: pl.Trainer, params: argparse.Namespace):
         collate_fn=collate_image_fn,
     )
     trainer = make_trainer(params)
-    model = Conv2dCoder(**vars(params))
+    model = get_model_cls(params.model)(**vars(params))
     trainer.test(model, test_loader)
 
 
@@ -209,6 +205,23 @@ def objective(trial: optuna.trial.Trial, default_params: argparse.Namespace):
 
 def init_simulator():
     return Simulator()
+
+
+def get_model_cls(name: str):
+    if name == "conv2d":
+        from mtt.models.convolutional import Conv2dCoder
+
+        return Conv2dCoder
+    elif name == "st":
+        from mtt.models.transformer import SpatialTransformer
+
+        return SpatialTransformer
+    elif name == "knn":
+        from mtt.models.kernel import KNN
+
+        return KNN
+    else:
+        raise ValueError(f"Unknown model: {name}.")
 
 
 def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
