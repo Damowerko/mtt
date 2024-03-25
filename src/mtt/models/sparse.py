@@ -204,7 +204,10 @@ class SparseBase(pl.LightningModule, ABC):
 
         # average probability across batches
         if return_average_probability:
-            logp = torch.logsumexp(logp, 0) - math.log(batch_size)
+            if batch_size < 1:
+                print(f"Warning: batch size is {batch_size} for some reason.")
+            else:
+                logp = torch.logsumexp(logp, 0) - math.log(batch_size)
         return logp
 
     def training_step(self, data: SparseData, *_):
