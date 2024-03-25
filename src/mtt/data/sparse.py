@@ -106,24 +106,12 @@ class SparseDataset(Dataset):
         self.df_sensors = pd.read_parquet(data_path / "sensors.parquet")
 
         # assume that the number of steps is the same for all simulations
-        self.n_steps = self.df_targets.index.get_level_values("step_idx").max() + 1
-        self.n_simulations = self.df_targets.index.get_level_values("sim_idx").max() + 1
+        self.n_steps: int = self.df_targets.index.get_level_values("step_idx").max() + 1
+        self.n_simulations: int = (
+            self.df_targets.index.get_level_values("sim_idx").max() + 1
+        )
 
-    def __len__(self) -> int:
-        if self.slim:
-            return self.n_simulations
-        # only consider full sequences of length self.length
-        # eg. if n_steps=20 then we can only return 1 sequence of length 20
-        return (self.n_steps - self.length + 1) * self.n_simulations
-
-    def __getitem__(self, index: int) -> SparseData:
-        if self.slim:
-            sim_idx = index
-            start_idx = np.random.randint(0, self.n_steps - self.length)
-        else:
-            sim_idx = index // (self.n_steps - self.length + 1)
-            start_idx = index % (self.n_steps - self.length + 1)
-
+    def get(self, sim_idx: int, start_idx: int) -> SparseData:
         data_list: list[SparseData] = []
         for step_idx in range(start_idx, start_idx + self.length):
             # get data only for current step
@@ -181,6 +169,22 @@ class SparseDataset(Dataset):
                 )
             )
         return SparseData.cat(data_list)
+
+    def __len__(self) -> int:
+        if self.slim:
+            return self.n_simulations
+        # only consider full sequences of length self.length
+        # eg. if n_steps=20 then we can only return 1 sequence of length 20
+        return (self.n_steps - self.length + 1) * self.n_simulations
+
+    def __getitem__(self, index: int) -> SparseData:
+        if self.slim:
+            sim_idx = index
+            start_idx = np.random.randint(0, self.n_steps - self.length)
+        else:
+            sim_idx = index // (self.n_steps - self.length + 1)
+            start_idx = index % (self.n_steps - self.length + 1)
+        return self.get(sim_idx, start_idx)
 
 
 def vector_to_df(
