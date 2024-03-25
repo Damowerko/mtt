@@ -1,7 +1,5 @@
 import inspect
-import os
-from tempfile import TemporaryDirectory
-from typing import Callable, Tuple
+from typing import Callable
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -326,33 +324,3 @@ class Conv2dCoder(EncoderDecoder):
         x = self.hidden(x)
         x = self.decoder(x)
         return x
-
-
-def load_model(uri: str) -> Tuple[Conv2dCoder, str]:
-    """Load a model from a uri.
-
-    Args:
-        uri (str): The uri of the model to load. By default this is a path to a file. If you want to use a wandb model, use the format wandb://<user>/<project>/<run_id>.
-    """
-    with TemporaryDirectory() as tmpdir:
-        if uri.startswith("wandb://"):
-            import wandb
-
-            user, project, run_id = uri[len("wandb://") :].split("/")
-
-            # Download the model from wandb to temporary directory
-            api = wandb.Api()
-            artifact = api.artifact(
-                f"{user}/{project}/model-{run_id}:best_k", type="model"
-            )
-            artifact.download(root=tmpdir)
-            uri = f"{tmpdir}/model.ckpt"
-            name = run_id
-        else:
-            name = os.path.basename(uri).split(".")[0]
-        try:
-            model = Conv2dCoder.load_from_checkpoint(uri)
-        except RuntimeError:
-            # try loading using old API
-            model = Conv2dCoder.load_from_checkpoint(uri, deprecated_api=True)
-        return model, name

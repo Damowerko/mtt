@@ -2,7 +2,7 @@ import numpy as np
 
 from mtt.cnn_filter import EncoderDecoderFilter, convert_measurements
 from mtt.data.image import OnlineImageDataset
-from mtt.models.convolutional import load_model
+from mtt.models.utils import load_model
 from mtt.utils import to_polar
 
 

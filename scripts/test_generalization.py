@@ -8,7 +8,8 @@ import torch
 from tqdm import tqdm
 
 from mtt.data import StackedImageData, build_vector_to_image_dp, image_collate_fn
-from mtt.models.convolutional import Conv2dCoder, load_model
+from mtt.models.convolutional import Conv2dCoder
+from mtt.models.utils import load_model
 from mtt.peaks import find_peaks
 from mtt.utils import compute_ospa
 
