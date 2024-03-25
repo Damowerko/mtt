@@ -2736,6 +2736,25 @@ docs = ["myst-parser", "pydata-sphinx-theme", "sphinx", "sphinxcontrib-github-al
 test = ["pep440", "pre-commit", "pytest", "testpath"]
 
 [[package]]
+name = "nbstripout-fast"
+version = "1.0.3"
+description = "Strips outputs from Jupyter notebooks"
+optional = false
+python-versions = "*"
+files = [
+    {file = "nbstripout_fast-1.0.3-py3-none-macosx_10_12_x86_64.whl", hash = "sha256:935221a1c3db0d45f5a92ba9a37c6a388c6dfd36d6132753b27fe1dc4820b11e"},
+    {file = "nbstripout_fast-1.0.3-py3-none-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:2ba97e71b64fcdb31e735e17fb9fab659fe1e3b4d43d5dd9ec5bc5eb04e5c08f"},
+    {file = "nbstripout_fast-1.0.3-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3a3688500a87b381c6cf5397f2456ad57c1c00da48eafdebf6677eb0459cf800"},
+    {file = "nbstripout_fast-1.0.3-py3-none-musllinux_1_1_x86_64.whl", hash = "sha256:a7e7cf0e2cbd7cdea91ae1275b03851715047a8b76130b19409304f0f496ca4b"},
+    {file = "nbstripout_fast-1.0.3-py3-none-win32.whl", hash = "sha256:90dfcd99f7ff0a47ceb168460bc10a352f044fb428a2077ffb235b1fd13f8452"},
+    {file = "nbstripout_fast-1.0.3-py3-none-win_amd64.whl", hash = "sha256:9a150d88bc48b36ab6e4958b3f21559681413bb1527c5f2db9a13acd87a6ce9d"},
+    {file = "nbstripout_fast-1.0.3.tar.gz", hash = "sha256:68f323dfa22ed8260d468ab22d891c839daf092ce8539145d65f6e7733db61fe"},
+]
+
+[package.extras]
+test = ["ipykernel", "nbconvert", "nbformat", "pytest"]
+
+[[package]]
 name = "nest-asyncio"
 version = "1.6.0"
 description = "Patch asyncio to allow nested event loops"
@@ -5519,4 +5538,4 @@ testing = ["big-O", "jaraco.functools", "jaraco.itertools", "more-itertools", "p
 [metadata]
 lock-version = "2.0"
 python-versions = ">=3.10,<3.12"
-content-hash = "720f9122c3abc16805373ef1fdcf9a5e21a12fa2a71c0ea1444a7db2b4ce0cf4"
+content-hash = "8dc2f027bb395c175dcedaecaecbda1b81d0bb585aa9e4fe18ffdfc0ef676233"
