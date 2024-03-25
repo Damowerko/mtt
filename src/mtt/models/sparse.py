@@ -40,13 +40,26 @@ class SparseBase(pl.LightningModule, ABC):
         lr: float = 1e-3,
         weight_decay: float = 0.0,
         ospa_cutoff: float = 500.0,
+        input_length: int = 1,
         **kwargs,
     ):
+        """
+        Initialize the Sparse model.
+
+        Args:
+            lr (float): The learning rate for the optimizer. Defaults to 1e-3.
+            weight_decay (float): The weight decay for the optimizer. Defaults to 0.0.
+            ospa_cutoff (float): The cutoff value for the OSPA metric. Defaults to 500.0.
+            input_length (int): The length of the input sequence. Defaults to 20.
+            **kwargs: Additional keyword arguments. These are ignored.
+
+        """
         super().__init__()
         self.save_hyperparameters()
         self.lr = lr
         self.weight_decay = weight_decay
         self.ospa_cutoff = ospa_cutoff
+        self.input_length = input_length
 
     def to_stinput(self, data: SparseData) -> SparseInput:
         """
@@ -71,8 +84,17 @@ class SparseBase(pl.LightningModule, ABC):
         return SparseInput(x, x_pos, x_batch)
 
     def to_stlabel(self, data: SparseData) -> SparseLabel:
-        y = data.target_position
-        y_batch = data.target_batch_sizes
+        # only keep the last time step
+        mask = data.target_time == self.input_length - 1
+        y = data.target_position[mask]
+
+        # to compute the number of elements in each batch after the mast
+        # first convert to a batch index, mask, and then count the number of elements
+        y_batch = torch.repeat_interleave(
+            torch.arange(data.target_batch_sizes.shape[0]), data.target_batch_sizes
+        )[mask].bincount(minlength=data.target_batch_sizes.shape[0])
+        assert y_batch.shape == data.target_batch_sizes.shape
+
         return SparseLabel(y, y_batch)
 
     def forward(
