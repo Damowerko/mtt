@@ -1,3 +1,4 @@
+import math
 import typing
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -100,6 +101,7 @@ class SparseDataset(Dataset):
         super().__init__()
         self.length = length
         self.slim = slim
+        self.data_root = data_root
 
         data_path = Path(data_root)
         self.df_targets = pd.read_parquet(data_path / "targets.parquet")
@@ -180,6 +182,15 @@ class SparseDataset(Dataset):
             torch.tensor([len(measurement_positions)]),
         )
 
+    def parse_index(self, index: int) -> tuple[int, int]:
+        if self.slim:
+            sim_idx = index
+            start_idx = np.random.randint(0, self.n_steps - self.length)
+        else:
+            sim_idx = index // (self.n_steps - self.length + 1)
+            start_idx = index % (self.n_steps - self.length + 1)
+        return sim_idx, start_idx
+
     def __len__(self) -> int:
         if self.slim:
             return self.n_simulations
@@ -188,12 +199,7 @@ class SparseDataset(Dataset):
         return (self.n_steps - self.length + 1) * self.n_simulations
 
     def __getitem__(self, index: int) -> SparseData:
-        if self.slim:
-            sim_idx = index
-            start_idx = np.random.randint(0, self.n_steps - self.length)
-        else:
-            sim_idx = index // (self.n_steps - self.length + 1)
-            start_idx = index % (self.n_steps - self.length + 1)
+        sim_idx, start_idx = self.parse_index(index)
         return self.get(sim_idx, start_idx)
 
 
