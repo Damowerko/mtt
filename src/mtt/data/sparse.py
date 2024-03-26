@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
+from tqdm import tqdm
 
 from mtt.data.sim import SimulationStep
 
@@ -189,25 +190,26 @@ class SparseDataset(Dataset):
 
 def vector_to_df(
     simdata: List[List[SimulationStep]],
+    tqdm_kwargs: dict | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Convert VectorData into pandas DataFrames. Willl use a ProcessPoolExecutor to parallelize the conversion.
     """
     with ProcessPoolExecutor() as executor:
-        dfs = zip(*executor.map(parse_sim, range(len(simdata)), simdata))
-        df_targets, df_measurements, df_sensors = tuple(
-            typing.cast(pd.DataFrame, pd.concat(df_list)).set_index(
-                ["sim_idx", "step_idx"]
+        if tqdm_kwargs is not None:
+            dfs = zip(
+                *tqdm(
+                    executor.map(parse_sim, range(len(simdata)), simdata),
+                    total=len(simdata),
+                    **tqdm_kwargs,
+                )
             )
-            for df_list in dfs
+        else:
+            dfs = zip(*executor.map(parse_sim, range(len(simdata)), simdata))
+        df_targets, df_measurements, df_sensors = tuple(
+            typing.cast(pd.DataFrame, pd.concat(df_list)) for df_list in dfs
         )
     return df_targets, df_measurements, df_sensors
-
-
-def parse_step(sim_idx: int, step_idx: int, step: SimulationStep):
-    dfs = step.to_pandas()
-    dfs = [df.assign(sim_idx=sim_idx, step_idx=step_idx) for df in dfs]
-    return tuple(dfs)
 
 
 def parse_sim(sim_idx: int, steps: list[SimulationStep]):
@@ -215,3 +217,12 @@ def parse_sim(sim_idx: int, steps: list[SimulationStep]):
         *[parse_step(sim_idx, step_idx, step) for step_idx, step in enumerate(steps)]
     )
     return tuple(pd.concat(df_list) for df_list in df_lists)
+
+
+def parse_step(sim_idx: int, step_idx: int, step: SimulationStep):
+    dfs = step.to_pandas()
+    dfs = [
+        df.assign(sim_idx=sim_idx, step_idx=step_idx).set_index(["sim_idx", "step_idx"])
+        for df in dfs
+    ]
+    return tuple(dfs)

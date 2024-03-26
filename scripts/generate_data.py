@@ -3,7 +3,6 @@ import pickle
 from functools import partial
 from pathlib import Path
 
-import dask
 import numpy as np
 import torch
 import tqdm
@@ -34,14 +33,12 @@ def filter_simulation(
 
 
 def main(args):
-    dask.config.set(scheduler="processes")
-
     out_dir = Path(args.out_dir)
     if not out_dir.exists():
         out_dir.mkdir(parents=True)
 
     online_dataset = OnlineImageDataset(
-        n_steps=119,
+        n_steps=args.n_steps,
         length=20,
         img_size=128 * args.scale,
         device="cuda",
@@ -54,19 +51,15 @@ def main(args):
         with (out_dir / "simulations.pkl").open("rb") as f:
             vectors_list = pickle.load(f)
     else:
-        vectors_list = list(
-            tqdm.tqdm(
-                parallel_rollout(
-                    online_dataset.sim_generator,
-                    n_rollouts=args.n_simulations,
-                ),
-                total=args.n_simulations,
-                desc="Generating simulation data",
-                unit="simulation",
-            )
+        vectors_list = parallel_rollout(
+            online_dataset.sim_generator,
+            n_rollouts=args.n_simulations,
+            tqdm_kwargs={"desc": "Generating simulation data", "unit": "simulation"},
         )
+
         # save the simulation data
         with (out_dir / "simulations.pkl").open("wb") as f:
+            print("Dumping simulation data pickle to disk...")
             pickle.dump(vectors_list, f)
 
     if not args.no_parquet:
@@ -79,8 +72,11 @@ def main(args):
             ]
         ):
             print("Converting to dataframes and saving to parquet files...")
-            # convert the simulation data to dask dataframes
-            df_targets, df_measurements, df_sensors = vector_to_df(vectors_list)
+            # convert the simulation data to parquet files
+            df_targets, df_measurements, df_sensors = vector_to_df(
+                vectors_list,
+                tqdm_kwargs={"desc": "Converting to dataframes", "unit": "simulation"},
+            )
             df_targets.to_parquet(out_dir / "targets.parquet")
             df_measurements.to_parquet(out_dir / "measurements.parquet")
             df_sensors.to_parquet(out_dir / "sensors.parquet")
@@ -109,6 +105,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-o", "--out-dir", type=str, default="./data/train/")
     parser.add_argument("-n", "--n-simulations", type=int, default=100)
+    parser.add_argument(
+        "--n_steps", type=int, default=119, help="Number of steps in the simulation."
+    )
     parser.add_argument(
         "-s", "--scale", type=int, default=1, help="Scale of the simulation in km."
     )

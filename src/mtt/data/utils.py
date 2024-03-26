@@ -3,6 +3,7 @@ from typing import Iterable, List, Sequence, TypeVar, Union
 
 import numpy as np
 import numpy.typing as npt
+from tqdm import tqdm
 
 T = TypeVar("T")
 
@@ -35,7 +36,8 @@ def rolling_window(
 def parallel_rollout(
     iterable: Iterable[T],
     n_rollouts=10,
-) -> Iterable[List[T]]:
+    tqdm_kwargs: dict | None = None,
+) -> List[List[T]]:
     """
     Uses a ProcessPoolExecutor to generate n_rollouts in parallel.
     Each rollout is a list of all elements from the iterable.
@@ -44,11 +46,17 @@ def parallel_rollout(
     Args:
         iterable: the data to be rolled out
         n_rollouts: the number of rollouts to generate
+        tqdm_kwargs: optional arguments for tqdm progress bar. None to disable.
     """
 
-    futures = []
     with ProcessPoolExecutor() as e:
-        for _ in range(n_rollouts):
-            futures += [e.submit(list, iterable)]
-    for f in as_completed(futures):
-        yield f.result()
+        if tqdm_kwargs is not None:
+            return list(
+                tqdm(
+                    e.map(list, [iterable] * n_rollouts),
+                    total=n_rollouts,
+                    **tqdm_kwargs,
+                )
+            )
+        else:
+            return list(e.map(list, [iterable] * n_rollouts))
