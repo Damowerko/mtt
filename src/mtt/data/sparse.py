@@ -104,80 +104,80 @@ class SparseDataset(Dataset):
         self.data_root = data_root
 
         data_path = Path(data_root)
-        self.df_targets = pd.read_parquet(data_path / "targets.parquet")
-        self.df_measurements = pd.read_parquet(data_path / "measurements.parquet")
-        self.df_sensors = pd.read_parquet(data_path / "sensors.parquet")
-
-        self.sims_targets = set(
-            self.df_targets.index.get_level_values("sim_idx").unique()
-        )
-        self.sims_measurements = set(
-            self.df_measurements.index.get_level_values("sim_idx").unique()
-        )
-        self.sims_sensors = set(
-            self.df_sensors.index.get_level_values("sim_idx").unique()
-        )
+        df_targets = pd.read_parquet(data_path / "targets.parquet")
+        df_measurements = pd.read_parquet(data_path / "measurements.parquet")
+        df_sensors = pd.read_parquet(data_path / "sensors.parquet")
 
         # assume that the number of steps is the same for all simulations
-        self.n_steps: int = self.df_targets.index.get_level_values("step_idx").max() + 1
-        self.n_simulations: int = (
-            self.df_targets.index.get_level_values("sim_idx").max() + 1
+        self.n_steps: int = df_sensors.index.get_level_values("step_idx").max() + 1
+        self.n_simulations: int = df_sensors.index.get_level_values("sim_idx").max() + 1
+
+        self.target_position_cols = df_targets.columns.str.contains("target_position_")
+        self.measurement_position_cols = df_measurements.columns.str.contains(
+            "measurement_position_"
         )
+        self.sensor_position_cols = df_sensors.columns.str.contains("sensor_position_")
+
+        self.targets = []
+        self.measurements = []
+        self.sensors = []
+        for sim_idx in range(self.n_simulations):
+            self.targets.append(
+                df_targets.loc[sim_idx].sort_index()
+                if sim_idx in df_targets.index
+                else None
+            )
+            self.measurements.append(
+                df_measurements.loc[sim_idx].sort_index()
+                if sim_idx in df_measurements.index
+                else None
+            )
+            self.sensors.append(
+                df_sensors.loc[sim_idx].sort_index()
+                if sim_idx in df_sensors.index
+                else None
+            )
 
     def get(self, sim_idx: int, start_idx: int) -> SparseData:
         end_idx = start_idx + self.length - 1
-        idx = pd.IndexSlice[sim_idx, start_idx:end_idx]
 
-        df_targets = None
-        if sim_idx in self.sims_targets:
-            df_targets = self.df_targets.loc[idx, :]
-
+        df_targets = self.targets[sim_idx]
         if df_targets is None or len(df_targets) == 0:
             target_positions = torch.zeros((0, 2))
             target_times = torch.zeros((0,))
         else:
-            df_targets = self.df_targets.loc[idx, :]
+            df_targets = df_targets.loc[start_idx:end_idx]
             target_positions = torch.from_numpy(
-                np.stack(df_targets["target_position"].to_list())
+                df_targets.values[:, self.target_position_cols].astype(np.float32)
             )
-            target_times = torch.from_numpy(
-                df_targets.index.get_level_values("step_idx").to_numpy() - start_idx
-            )
+            target_times = torch.from_numpy(df_targets.index.to_numpy() - start_idx)
 
-        df_measurements = None
-        if sim_idx in self.sims_measurements:
-            df_measurements = self.df_measurements.loc[idx, :]
-
+        df_measurements = self.measurements[sim_idx]
         if df_measurements is None or len(df_measurements) == 0:
             measurement_positions = torch.zeros((0, 2))
             is_clutters = torch.zeros((0,), dtype=torch.bool)
             sensor_indices = torch.zeros((0,), dtype=torch.long)
             measurement_times = torch.zeros((0,), dtype=torch.long)
         else:
+            df_measurements = df_measurements.loc[start_idx:end_idx]
             measurement_positions = torch.from_numpy(
-                np.stack(df_measurements["measurement"].to_list(), axis=0)
+                df_measurements.values[:, self.measurement_position_cols].astype(
+                    np.float32
+                )
             )
-            is_clutters = torch.from_numpy(
-                np.stack(df_measurements["clutter"].to_list(), axis=0)
-            )
-            sensor_indices = torch.from_numpy(
-                np.stack(df_measurements["sensor_idx"].to_list(), axis=0)
-            )
+            is_clutters = torch.from_numpy(df_measurements["clutter"].to_numpy())
+            sensor_indices = torch.from_numpy(df_measurements["sensor_idx"].to_numpy())
             measurement_times = torch.from_numpy(
-                df_measurements.index.get_level_values("step_idx").to_numpy()
-                - start_idx
+                df_measurements.index.to_numpy() - start_idx
             )
 
-        df_sensors = None
-        if sim_idx in self.sims_sensors:
-            df_sensors = self.df_sensors.loc[idx, :]
-
+        df_sensors = self.sensors[sim_idx]
         if df_sensors is None or len(df_sensors) == 0:
             sensor_positions = torch.zeros((0, 2))
         else:
-            df_sensors = self.df_sensors.loc[idx, :]
+            df_sensors = df_sensors.loc[start_idx:end_idx]
             sensor_positions = torch.from_numpy(
-                np.stack(df_sensors["sensor_position"].to_list(), axis=0)
+                df_sensors.values[:, self.sensor_position_cols].astype(np.float32)
             )
 
         return SparseData(

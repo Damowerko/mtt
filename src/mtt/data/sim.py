@@ -24,7 +24,12 @@ class SimulationStep(NamedTuple):
             measurement_df: a dataframe with columns [sensor_idx, measurement, clutter]
             sensor_df: a dataframe with columns [sensor_idx, sensor_position]
         """
-        target_df = pd.DataFrame(dict(target_position=self.target_positions.tolist()))
+        target_df = pd.DataFrame(
+            {
+                f"target_position_{i}": self.target_positions[:, i].tolist()
+                for i in range(self.target_positions.shape[1])
+            }
+        )
         measurement_dfs = []
         for i, (m, c) in enumerate(zip(self.measurements, self.clutter)):
             measurement_dfs += [
@@ -32,16 +37,22 @@ class SimulationStep(NamedTuple):
                 pd.DataFrame(
                     dict(
                         sensor_idx=i,
-                        measurement=m.tolist(),
                         clutter=False,
+                        **{
+                            f"measurement_position_{i}": m[:, i]
+                            for i in range(m.shape[1])
+                        },
                     )
                 ),
                 # DataFrame with clutter of sensor i
                 pd.DataFrame(
                     dict(
                         sensor_idx=i,
-                        measurement=c.tolist(),
                         clutter=True,
+                        **{
+                            f"measurement_position_{i}": c[:, i]
+                            for i in range(c.shape[1])
+                        },
                     )
                 ),
             ]
@@ -49,7 +60,10 @@ class SimulationStep(NamedTuple):
         sensor_df = pd.DataFrame(
             dict(
                 sensor_idx=range(len(self.sensor_positions)),
-                sensor_position=self.sensor_positions.tolist(),
+                **{
+                    f"sensor_position_{i}": self.sensor_positions[:, i].tolist()
+                    for i in range(self.sensor_positions.shape[1])
+                },
             )
         )
         return target_df, measurement_df, sensor_df

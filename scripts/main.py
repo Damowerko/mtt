@@ -13,7 +13,7 @@ import wandb
 from optuna.integration.pytorch_lightning import PyTorchLightningPruningCallback
 from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers.wandb import WandbLogger
-from pytorch_lightning.profilers import AdvancedProfiler
+from pytorch_lightning.profilers import AdvancedProfiler, PyTorchProfiler
 from torch.utils.data import DataLoader, random_split
 from wandb.wandb_run import Run
 
@@ -241,7 +241,11 @@ def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
 
     # configure profiler
     if params.profiler == "advanced":
-        profiler = AdvancedProfiler(filename="profile")
+        profiler = AdvancedProfiler(dirpath=".", filename="profile")
+    elif params.profiler == "pytorch":
+        profiler = PyTorchProfiler(
+            dirpath=".", export_to_chrome=True, sort_by_key="cuda_time_total"
+        )
     else:
         profiler = params.profiler
 
