@@ -159,11 +159,11 @@ class SparseDataset(Dataset):
             )
 
         return SparseData(
-            target_positions,
+            target_positions.float(),
             target_times,
             torch.tensor([len(target_positions)]),
-            measurement_positions,
-            sensor_positions[sensor_indices],
+            measurement_positions.float(),
+            sensor_positions[sensor_indices].float(),
             is_clutters,
             measurement_times,
             torch.tensor([len(measurement_positions)]),
