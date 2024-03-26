@@ -75,7 +75,7 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
         num_workers=params.num_workers,
         pin_memory=True,
         drop_last=True,
-        persistent_workers=True,
+        persistent_workers=True if params.num_workers > 0 else False,
     )
 
     model_cls = get_model_class(params.model)
