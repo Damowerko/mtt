@@ -113,17 +113,27 @@ class SparseDataset(Dataset):
         )
 
     def get(self, sim_idx: int, start_idx: int) -> SparseData:
-        end_idx = start_idx + self.length
+        end_idx = start_idx + self.length - 1
 
         idx = pd.IndexSlice[sim_idx, start_idx:end_idx]
-        df_targets = self.df_targets.loc[idx, :]
-        df_measurements = self.df_measurements.loc[idx, :]
-        df_sensors = self.df_sensors.loc[idx, :]
 
-        if len(df_targets) == 0:
+        df_targets = None
+        if sim_idx in self.df_targets.index.get_level_values("sim_idx"):
+            df_targets = self.df_targets.loc[idx, :]
+
+        df_measurements = None
+        if sim_idx in self.df_measurements.index.get_level_values("sim_idx"):
+            df_measurements = self.df_measurements.loc[idx, :]
+
+        df_sensors = None
+        if sim_idx in self.df_sensors.index.get_level_values("sim_idx"):
+            df_sensors = self.df_sensors.loc[idx, :]
+
+        if df_targets is None or len(df_targets) == 0:
             target_positions = torch.zeros((0, 2))
             target_times = torch.zeros((0,))
         else:
+            df_targets = self.df_targets.loc[idx, :]
             target_positions = torch.from_numpy(
                 np.stack(df_targets["target_position"].to_list())
             )
@@ -131,7 +141,7 @@ class SparseDataset(Dataset):
                 df_targets.index.get_level_values("step_idx").to_numpy() - start_idx
             )
 
-        if len(df_measurements) == 0:
+        if df_measurements is None or len(df_measurements) == 0:
             measurement_positions = torch.zeros((0, 2))
             is_clutters = torch.zeros((0,), dtype=torch.bool)
             sensor_indices = torch.zeros((0,), dtype=torch.long)
@@ -151,9 +161,10 @@ class SparseDataset(Dataset):
                 - start_idx
             )
 
-        if len(df_sensors) == 0:
+        if df_sensors is None or len(df_sensors) == 0:
             sensor_positions = torch.zeros((0, 2))
         else:
+            df_sensors = self.df_sensors.loc[idx, :]
             sensor_positions = torch.from_numpy(
                 np.stack(df_sensors["sensor_position"].to_list(), axis=0)
             )
