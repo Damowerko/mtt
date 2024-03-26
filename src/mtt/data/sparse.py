@@ -113,63 +113,61 @@ class SparseDataset(Dataset):
         )
 
     def get(self, sim_idx: int, start_idx: int) -> SparseData:
-        data_list: list[SparseData] = []
-        for step_idx in range(start_idx, start_idx + self.length):
-            # get data only for current step
-            idx = (sim_idx, step_idx)
-            time = step_idx - start_idx
+        end_idx = start_idx + self.length
 
-            if idx not in self.df_targets.index:
-                target_position = torch.zeros((0, 2))
-                target_time = torch.zeros((0,))
-            else:
-                df_targets = self.df_targets.loc[idx, :]
-                target_position = torch.from_numpy(
-                    np.stack(df_targets["target_position"].to_list())
-                )
-                target_time = torch.full(target_position.shape[:1], time)
+        idx = pd.IndexSlice[sim_idx, start_idx:end_idx]
+        df_targets = self.df_targets.loc[idx, :]
+        df_measurements = self.df_measurements.loc[idx, :]
+        df_sensors = self.df_sensors.loc[idx, :]
 
-            if idx not in self.df_measurements.index:
-                measurement_position = torch.zeros((0, 2))
-                is_clutter = torch.zeros((0,), dtype=torch.bool)
-                sensor_index = torch.zeros((0,), dtype=torch.long)
-                measurement_time = torch.zeros((0,), dtype=torch.long)
-            else:
-                df_measurements = self.df_measurements.loc[idx, :]
-                measurement_position = torch.from_numpy(
-                    np.stack(df_measurements["measurement"].to_list(), axis=0)
-                )
-                is_clutter = torch.from_numpy(
-                    np.stack(df_measurements["clutter"].to_list(), axis=0)
-                )
-                sensor_index = torch.from_numpy(
-                    np.stack(df_measurements["sensor_idx"].to_list(), axis=0)
-                )
-                measurement_time = torch.full(
-                    (len(df_measurements),), time, dtype=torch.long
-                )
-
-            if idx not in self.df_sensors.index:
-                sensor_position = torch.zeros((0, 2))
-            else:
-                df_sensors = self.df_sensors.loc[idx, :]
-                sensor_position = torch.from_numpy(
-                    np.stack(df_sensors["sensor_position"].to_list(), axis=0)
-                )
-            # create SparseData for current step and append
-            data_list.append(
-                SparseData(
-                    target_position.float(),
-                    target_time,
-                    torch.tensor([len(target_position)]),
-                    measurement_position.float(),
-                    sensor_position[sensor_index].float(),
-                    is_clutter,
-                    measurement_time,
-                    torch.tensor([len(measurement_position)]),
-                )
+        if len(df_targets) == 0:
+            target_positions = torch.zeros((0, 2))
+            target_times = torch.zeros((0,))
+        else:
+            target_positions = torch.from_numpy(
+                np.stack(df_targets["target_position"].to_list())
             )
-        return SparseData.cat(data_list)
+            target_times = torch.from_numpy(
+                df_targets.index.get_level_values("step_idx").to_numpy() - start_idx
+            )
+
+        if len(df_measurements) == 0:
+            measurement_positions = torch.zeros((0, 2))
+            is_clutters = torch.zeros((0,), dtype=torch.bool)
+            sensor_indices = torch.zeros((0,), dtype=torch.long)
+            measurement_times = torch.zeros((0,), dtype=torch.long)
+        else:
+            measurement_positions = torch.from_numpy(
+                np.stack(df_measurements["measurement"].to_list(), axis=0)
+            )
+            is_clutters = torch.from_numpy(
+                np.stack(df_measurements["clutter"].to_list(), axis=0)
+            )
+            sensor_indices = torch.from_numpy(
+                np.stack(df_measurements["sensor_idx"].to_list(), axis=0)
+            )
+            measurement_times = torch.from_numpy(
+                df_measurements.index.get_level_values("step_idx").to_numpy()
+                - start_idx
+            )
+
+        if len(df_sensors) == 0:
+            sensor_positions = torch.zeros((0, 2))
+        else:
+            sensor_positions = torch.from_numpy(
+                np.stack(df_sensors["sensor_position"].to_list(), axis=0)
+            )
+
+        return SparseData(
+            target_positions,
+            target_times,
+            torch.tensor([len(target_positions)]),
+            measurement_positions,
+            sensor_positions[sensor_indices],
+            is_clutters,
+            measurement_times,
+            torch.tensor([len(measurement_positions)]),
+        )
 
     def __len__(self) -> int:
         if self.slim:
