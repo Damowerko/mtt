@@ -14,9 +14,11 @@ from mtt.data.utils import parallel_rollout
 
 
 def filter_simulation(
-    simulation: list[SimulationStep], window_width: int, min_window_width: int = 0
+    simulation: list[SimulationStep],
+    window_width: int,
+    min_measurements: int = 0,
 ):
-    if min_window_width:
+    if min_measurements > 0:
         # the number of measurements within each sample
         n_measurements = [len(s.measurements) for s in simulation]
         # the worst case number of measurements within a 20 step window
@@ -27,7 +29,7 @@ def filter_simulation(
             .sum(-1)
             .min()
         )
-        if n_measurements_min < min_window_width:
+        if n_measurements_min < min_measurements:
             return False
     return True
 
@@ -54,7 +56,11 @@ def main(args):
         vectors_list = parallel_rollout(
             online_dataset.sim_generator,
             n_rollouts=args.n_simulations,
-            tqdm_kwargs={"desc": "Generating simulation data", "unit": "simulation"},
+            tqdm_kwargs={
+                "desc": "Generating simulation data",
+                "unit": "simulation",
+                "smoothing": 0.5,
+            },
         )
 
         # save the simulation data

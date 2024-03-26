@@ -108,6 +108,16 @@ class SparseDataset(Dataset):
         self.df_measurements = pd.read_parquet(data_path / "measurements.parquet")
         self.df_sensors = pd.read_parquet(data_path / "sensors.parquet")
 
+        self.sims_targets = set(
+            self.df_targets.index.get_level_values("sim_idx").unique()
+        )
+        self.sims_measurements = set(
+            self.df_measurements.index.get_level_values("sim_idx").unique()
+        )
+        self.sims_sensors = set(
+            self.df_sensors.index.get_level_values("sim_idx").unique()
+        )
+
         # assume that the number of steps is the same for all simulations
         self.n_steps: int = self.df_targets.index.get_level_values("step_idx").max() + 1
         self.n_simulations: int = (
@@ -116,20 +126,11 @@ class SparseDataset(Dataset):
 
     def get(self, sim_idx: int, start_idx: int) -> SparseData:
         end_idx = start_idx + self.length - 1
-
         idx = pd.IndexSlice[sim_idx, start_idx:end_idx]
 
         df_targets = None
-        if sim_idx in self.df_targets.index.get_level_values("sim_idx"):
+        if sim_idx in self.sims_targets:
             df_targets = self.df_targets.loc[idx, :]
-
-        df_measurements = None
-        if sim_idx in self.df_measurements.index.get_level_values("sim_idx"):
-            df_measurements = self.df_measurements.loc[idx, :]
-
-        df_sensors = None
-        if sim_idx in self.df_sensors.index.get_level_values("sim_idx"):
-            df_sensors = self.df_sensors.loc[idx, :]
 
         if df_targets is None or len(df_targets) == 0:
             target_positions = torch.zeros((0, 2))
@@ -142,6 +143,10 @@ class SparseDataset(Dataset):
             target_times = torch.from_numpy(
                 df_targets.index.get_level_values("step_idx").to_numpy() - start_idx
             )
+
+        df_measurements = None
+        if sim_idx in self.sims_measurements:
+            df_measurements = self.df_measurements.loc[idx, :]
 
         if df_measurements is None or len(df_measurements) == 0:
             measurement_positions = torch.zeros((0, 2))
@@ -162,6 +167,10 @@ class SparseDataset(Dataset):
                 df_measurements.index.get_level_values("step_idx").to_numpy()
                 - start_idx
             )
+
+        df_sensors = None
+        if sim_idx in self.sims_sensors:
+            df_sensors = self.df_sensors.loc[idx, :]
 
         if df_sensors is None or len(df_sensors) == 0:
             sensor_positions = torch.zeros((0, 2))

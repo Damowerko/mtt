@@ -13,6 +13,7 @@ import wandb
 from optuna.integration.pytorch_lightning import PyTorchLightningPruningCallback
 from pytorch_lightning.callbacks import Callback, EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers.wandb import WandbLogger
+from pytorch_lightning.profilers import AdvancedProfiler
 from torch.utils.data import DataLoader, random_split
 from wandb.wandb_run import Run
 
@@ -237,6 +238,13 @@ def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
             )
         ]
     callbacks += [EarlyStopping(monitor="val/loss", patience=params.patience)]
+
+    # configure profiler
+    if params.profiler == "advanced":
+        profiler = AdvancedProfiler(filename="profile")
+    else:
+        profiler = params.profiler
+
     return pl.Trainer(
         logger=logger,
         callbacks=callbacks,
@@ -245,7 +253,7 @@ def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
         devices=1,
         max_epochs=params.max_epochs,
         default_root_dir=".",
-        profiler=params.profiler,
+        profiler=profiler,
         fast_dev_run=params.fast_dev_run,
         log_every_n_steps=1 if params.slim else 50,
     )
