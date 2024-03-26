@@ -1,20 +1,14 @@
-import math
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import NamedTuple, Optional
 
-import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric.nn as gnn
-from pytorch_lightning.utilities.types import OptimizerLRScheduler
-from scipy.optimize import linear_sum_assignment
 from torch_geometric.utils import bipartite_subgraph, subgraph
 from torchcps.attention import SpatialAttention
 
-from mtt.data.sparse import SparseData
 from mtt.models.sparse import SparseBase
-from mtt.utils import add_model_specific_args, compute_ospa
+from mtt.utils import add_model_specific_args
 
 
 class STInput(NamedTuple):
