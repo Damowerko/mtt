@@ -109,6 +109,7 @@ class SelectionMechanism(nn.Module):
         n_layers: int,
         threshold: float,
         dropout: float = 0.0,
+        radius: float = 1.0,
     ) -> None:
         """
         Initialize the Transformer model.
@@ -126,6 +127,7 @@ class SelectionMechanism(nn.Module):
         self.input_dim = input_dim
         self.n_channels = n_channels
         self.threshold = threshold
+        self.radius = radius
 
         self.mlp = gnn.MLP(
             in_channels=n_channels,
@@ -157,27 +159,32 @@ class SelectionMechanism(nn.Module):
 
         x = self.mlp(embeddings, batch, batch_size)
 
-        update = F.leaky_relu(x[..., : self.input_dim])
-        objects = F.leaky_relu(
-            x[..., self.input_dim : self.input_dim + self.n_channels]
-        )
+        update = x[..., : self.input_dim]
+        objects = x[..., self.input_dim : self.input_dim + self.n_channels]
         score = self.score_norm(x[..., -1, None])[..., 0].sigmoid()
 
         # Keep only embeddings with score above threshold
         mask = score > self.threshold
         objects = objects[mask, :]
-        objects_pos = inputs[mask, :] + update[mask, :]
+        objects_pos = inputs[mask, :] + update[mask, :] * self.radius
         return objects, objects_pos, mask
 
 
 class SpatialTransformerDecoder(nn.Module):
     def __init__(
-        self, n_channels: int, n_layers: int, pos_dim: int, heads=1, dropout=0.0
+        self,
+        n_channels: int,
+        n_layers: int,
+        pos_dim: int,
+        heads=1,
+        dropout=0.0,
+        radius: float = 1.0,
     ) -> None:
         super().__init__()
         self.n_channels = n_channels
         self.n_layers = n_layers
         self.pos_dim = pos_dim
+        self.radius = radius
 
         self.self_attention = nn.ModuleList(
             [
@@ -249,7 +256,7 @@ class SpatialTransformerDecoder(nn.Module):
             # feed forward with residual connection
             mlp_out = self.mlp[i](object_cross)
             object = self.norm_mlp[i](object_cross + mlp_out[..., : -self.pos_dim])
-            object_pos = object_pos + mlp_out[..., -self.pos_dim :]
+            object_pos = object_pos + mlp_out[..., -self.pos_dim :] * self.radius
         return object, object_pos
 
 
@@ -307,11 +314,11 @@ class SpatialTransformer(SparseBase):
             n_channels * heads,
             n_channels * heads,
             n_encoder,
-            0.5,
+            self.selection_threshold,
             dropout,
         )
         self.decoder = SpatialTransformerDecoder(
-            n_channels, n_decoder, pos_dim, heads, dropout
+            n_channels, n_decoder, pos_dim, heads, dropout, radius
         )
 
     def _forward(
@@ -375,7 +382,7 @@ class SpatialTransformer(SparseBase):
         object = self.readout.forward(object, x_batch)
         assert x_pos.shape[-1] == self.state_dim
         # object output is mu relative to x_pos for shift-equivariance
-        mu = object_pos + object[..., : self.state_dim]
+        mu = object_pos + object[..., : self.state_dim] * self.radius
         sigma = object[..., self.state_dim : 2 * self.state_dim]
         # existence probability logit
         logits = object[..., -1]
