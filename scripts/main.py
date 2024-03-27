@@ -218,7 +218,8 @@ def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
             project="mtt", save_dir="logs", config=params, log_model=True
         )
         logger.log_hyperparams(params)
-        typing.cast(Run, logger.experiment).log_code(
+        run = typing.cast(Run, logger.experiment)
+        run.log_code(
             Path(__file__).parent.parent,
             include_fn=lambda path: (
                 path.endswith(".py")
@@ -229,7 +230,7 @@ def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
         callbacks += [
             ModelCheckpoint(
                 monitor="val/loss",
-                dirpath=f"./checkpoints/{logger._id}",
+                dirpath=f"./checkpoints/{run.id}",
                 filename="best",
                 auto_insert_metric_name=False,
                 mode="min",
