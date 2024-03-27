@@ -165,9 +165,9 @@ class SelectionMechanism(nn.Module):
 
         # Keep only embeddings with score above threshold
         mask = score > self.threshold
-        inputs_updated = inputs[mask, :] + update[mask, :]
         objects = objects[mask, :]
-        return inputs_updated, objects, mask
+        objects_pos = inputs[mask, :] + update[mask, :]
+        return objects, objects_pos, mask
 
 
 class SpatialTransformerDecoder(nn.Module):
@@ -231,37 +231,26 @@ class SpatialTransformerDecoder(nn.Module):
     def forward(
         self,
         encoding: torch.Tensor,
+        encoding_pos: torch.Tensor,
         object: torch.Tensor,
-        pos: torch.Tensor,
-        mask: torch.Tensor,
-        edge_index: torch.Tensor,
+        object_pos: torch.Tensor,
+        edge_index_object: torch.Tensor,
+        edge_index_cross: torch.Tensor,
     ):
-        # k x k subgraph
-        edge_index_object = subgraph(mask, edge_index, relabel_nodes=True)[0]
-        # N x k subgraph
-        edge_index_cross = bipartite_subgraph(
-            (
-                torch.ones_like(mask),
-                mask,
-            ),
-            edge_index,
-            relabel_nodes=True,
-        )[0]
-        object_pos = pos[mask]
         for i in range(self.n_layers):
             # self attention (k x k) on object
             object_self = self.self_attention[i](object, object_pos, edge_index_object)
             object_self = self.norm_self[i](object + object_self)
             # cross attention from encoding to object (N x k)
             object_cross = self.cross_attention[i](
-                (encoding, object_self), (pos, object_pos), edge_index_cross
+                (encoding, object_self), (encoding_pos, object_pos), edge_index_cross
             )
             object_cross = self.norm_cross[i](object_self + object_cross)
             # feed forward with residual connection
             mlp_out = self.mlp[i](object_cross)
-            object_pos = object_pos + mlp_out[..., : self.pos_dim]
-            object = self.norm_mlp[i](object_cross + mlp_out[..., self.pos_dim :])
-        return object
+            object = self.norm_mlp[i](object_cross + mlp_out[..., : -self.pos_dim])
+            object_pos = object_pos + mlp_out[..., -self.pos_dim :]
+        return object, object_pos
 
 
 class SpatialTransformer(SparseBase):
@@ -314,7 +303,7 @@ class SpatialTransformer(SparseBase):
             n_channels, n_encoder, pos_dim, heads, dropout
         )
         self.selection = SelectionMechanism(
-            n_channels * heads,
+            pos_dim,
             n_channels * heads,
             n_channels * heads,
             n_encoder,
@@ -356,23 +345,37 @@ class SpatialTransformer(SparseBase):
         encoding = self.encoder.forward(x, x_pos, edge_index)
 
         # Selection Mechanism
-        x, object, mask = self.selection.forward(x, encoding, batch_idx)
+        object, object_pos, mask = self.selection.forward(x_pos, encoding, batch_idx)
         x_batch = batch_idx[mask].bincount()
 
+        # TODO: Investigate recomputing the graph
+        # k x k subgraph
+        edge_index_object = subgraph(mask, edge_index, relabel_nodes=True)[0]
+        # N x k subgraph
+        edge_index_cross = bipartite_subgraph(
+            (
+                torch.ones_like(mask),
+                mask,
+            ),
+            edge_index,
+            relabel_nodes=True,
+        )[0]
+
         # Decoder
-        object = self.decoder.forward(
+        object, object_pos = self.decoder.forward(
             encoding,
-            object,
             x_pos,
-            mask=mask,
-            edge_index=edge_index,
+            object,
+            object_pos,
+            edge_index_object,
+            edge_index_cross,
         )
 
         # Readout
         object = self.readout.forward(object, x_batch)
         assert x_pos.shape[-1] == self.state_dim
         # object output is mu relative to x_pos for shift-equivariance
-        mu = x_pos[mask] + object[..., : self.state_dim]
+        mu = object_pos + object[..., : self.state_dim]
         sigma = object[..., self.state_dim : 2 * self.state_dim]
         # existence probability logit
         logits = object[..., -1]
