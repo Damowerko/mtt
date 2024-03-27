@@ -41,6 +41,8 @@ class SparseBase(pl.LightningModule, ABC):
         weight_decay: float = 0.0,
         ospa_cutoff: float = 500.0,
         input_length: int = 1,
+        loss_type: str = "logp",
+        mse_sigma: float = 10.0,
         **kwargs,
     ):
         """
@@ -60,6 +62,8 @@ class SparseBase(pl.LightningModule, ABC):
         self.weight_decay = weight_decay
         self.ospa_cutoff = ospa_cutoff
         self.input_length = input_length
+        self.loss_type = loss_type
+        self.mse_sigma = mse_sigma
 
     def to_stinput(self, data: SparseData) -> SparseInput:
         """
@@ -128,7 +132,49 @@ class SparseBase(pl.LightningModule, ABC):
         """
         raise NotImplementedError()
 
-    def logp(
+    def mse_loss(
+        self,
+        x: torch.Tensor,
+        x_logp: torch.Tensor,
+        x_batch_sizes: torch.Tensor,
+        y: torch.Tensor,
+        y_batch_sizes: torch.Tensor,
+        sigma: float,
+    ):
+        """
+        Assumes that x and y are centers of gaussian pulses with variance sigma^2. Computes the MSE loss between the two.
+        ||x-y||^2 = ||x||^2 + ||y||^2 - 2<x,y>
+        """
+
+        _x = x.tensor_split(x_batch_sizes.cumsum(0)[:-1].cpu())
+        _x_prob = x_logp.exp().tensor_split(x_batch_sizes.cumsum(0)[:-1].cpu())
+        _y = y.tensor_split(y_batch_sizes.cumsum(0)[:-1].cpu())
+
+        batch_size = x_batch_sizes.shape[0]
+        loss = 0
+        for batch_idx in range(batch_size):
+
+            x_dist = torch.cdist(_x[batch_idx], _x[batch_idx], p=2)
+            K_xx = torch.exp(-(x_dist**2) / (2 * sigma**2))
+            xx = (
+                _x_prob[batch_idx].unsqueeze(-2)
+                @ K_xx
+                @ _x_prob[batch_idx].unsqueeze(-1)
+            ).squeeze(-1)
+
+            y_dist = torch.cdist(_y[batch_idx], _y[batch_idx], p=2)
+            K_yy = torch.exp(-(y_dist**2) / (2 * sigma**2))
+            # assuming that the ground truth is always 1
+            yy = K_yy.sum()
+
+            cross_dist = torch.cdist(_x[batch_idx], _y[batch_idx], p=2)
+            K_xy = torch.exp(-(cross_dist**2) / (2 * sigma**2))
+            xy = (_x_prob[batch_idx].unsqueeze(-2) @ K_xy).sum()
+
+            loss += xx + yy - 2 * xy
+        return loss / batch_size
+
+    def logp_loss(
         self,
         mu: torch.Tensor,
         sigma: torch.Tensor,
@@ -210,55 +256,57 @@ class SparseBase(pl.LightningModule, ABC):
                 logp = torch.logsumexp(logp, 0) - math.log(batch_size)
         return logp
 
+    def loss(self, label: SparseLabel, output: SparseOutput, log_prefix: str):
+        batch_size = output.batch.shape[0]
+        if self.loss_type == "logp":
+            logp = self.logp_loss(
+                output.mu,
+                output.sigma,
+                output.logp,
+                output.batch,
+                label.y,
+                label.y_batch,
+            )
+            loss = -logp
+            self.log(f"{log_prefix}/loss", loss, batch_size=batch_size)
+            self.log(
+                f"{log_prefix}/prob", logp.exp(), prog_bar=True, batch_size=batch_size
+            )
+            self.log(f"{log_prefix}/logp", logp, prog_bar=True, batch_size=batch_size)
+        elif self.loss_type == "mse":
+            loss = self.mse_loss(
+                output.mu,
+                output.logp,
+                output.batch,
+                label.y,
+                label.y_batch,
+                self.mse_sigma,
+            )
+            self.log(f"{log_prefix}/loss", loss, batch_size=batch_size, prog_bar=True)
+        return loss
+
     def training_step(self, data: SparseData, *_):
         input = self.to_stinput(data)
         label = self.to_stlabel(data)
         output = self.forward(*input)
-
-        batch_size = input.x_batch.shape[0]
-
-        logp = self.logp(
-            output.mu,
-            output.sigma,
-            output.logp,
-            output.batch,
-            label.y,
-            label.y_batch,
-        )
-        loss = -logp
-        self.log("train/loss", loss, batch_size=batch_size)
-        self.log("train/prob", logp.exp(), prog_bar=True, batch_size=batch_size)
-        self.log("train/logp", logp, prog_bar=True, batch_size=batch_size)
-        return loss
+        return self.loss(label, output, log_prefix="train")
 
     def validation_step(self, data: SparseData, *_):
         input = self.to_stinput(data)
         label = self.to_stlabel(data)
         output = self.forward(*input)
+        loss = self.loss(label, output, log_prefix="val")
 
-        batch_size = input.x_batch.shape[0]
-
-        logp = self.logp(
-            output.mu,
-            output.sigma,
-            output.logp,
-            output.batch,
-            label.y,
-            label.y_batch,
-        )
-
-        loss = -logp
-        self.log("val/loss", loss, batch_size=batch_size)
-        self.log("val/logp", logp, prog_bar=True, batch_size=batch_size)
-
-        X = output.mu[output.logp.exp() > 0.5]
-        ospa = compute_ospa(
-            X.detach().cpu().numpy(),
-            label.y.detach().cpu().numpy(),
-            self.ospa_cutoff,
-            p=2,
-        )
-        self.log("val/ospa", ospa, prog_bar=True, batch_size=batch_size)
+        if self.loss_type == "logp":
+            batch_size = input.x_batch.shape[0]
+            X = output.mu[output.logp.exp() > 0.5]
+            ospa = compute_ospa(
+                X.detach().cpu().numpy(),
+                label.y.detach().cpu().numpy(),
+                self.ospa_cutoff,
+                p=2,
+            )
+            self.log("val/ospa", ospa, prog_bar=True, batch_size=batch_size)
 
         return loss
 
