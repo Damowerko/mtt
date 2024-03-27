@@ -229,7 +229,7 @@ def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
         callbacks += [
             ModelCheckpoint(
                 monitor="val/loss",
-                dirpath="./checkpoints",
+                dirpath=f"./checkpoints/{logger._id}",
                 filename="best",
                 auto_insert_metric_name=False,
                 mode="min",
