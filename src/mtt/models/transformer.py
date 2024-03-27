@@ -177,6 +177,7 @@ class SpatialTransformerDecoder(nn.Module):
         super().__init__()
         self.n_channels = n_channels
         self.n_layers = n_layers
+        self.pos_dim = pos_dim
 
         self.self_attention = nn.ModuleList(
             [
@@ -203,7 +204,11 @@ class SpatialTransformerDecoder(nn.Module):
         self.mlp = nn.ModuleList(
             [
                 gnn.MLP(
-                    [n_channels * heads, n_channels * heads, n_channels * heads],
+                    [
+                        n_channels * heads,
+                        n_channels * heads,
+                        n_channels * heads + pos_dim,
+                    ],
                     bias=True,
                     dropout=dropout,
                     act="leaky_relu",
@@ -242,19 +247,20 @@ class SpatialTransformerDecoder(nn.Module):
             edge_index,
             relabel_nodes=True,
         )[0]
-        pos_masked = pos[mask]
+        object_pos = pos[mask]
         for i in range(self.n_layers):
             # self attention (k x k) on object
-            object_self = self.self_attention[i](object, pos_masked, edge_index_object)
+            object_self = self.self_attention[i](object, object_pos, edge_index_object)
             object_self = self.norm_self[i](object + object_self)
             # cross attention from encoding to object (N x k)
             object_cross = self.cross_attention[i](
-                (encoding, object_self), (pos, pos_masked), edge_index_cross
+                (encoding, object_self), (pos, object_pos), edge_index_cross
             )
             object_cross = self.norm_cross[i](object_self + object_cross)
             # feed forward with residual connection
-            object_mlp = self.mlp[i](object_cross)
-            object = self.norm_mlp[i](object_cross + object_mlp)
+            mlp_out = self.mlp[i](object_cross)
+            object_pos = object_pos + mlp_out[..., : self.pos_dim]
+            object = self.norm_mlp[i](object_cross + mlp_out[..., self.pos_dim :])
         return object
 
 
