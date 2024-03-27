@@ -141,7 +141,7 @@ class EncoderDecoderFilter(CNNFilter[CNNEsimate]):
         # we only care about the last output of the model, take care of the batch dimension
         with torch.no_grad():
             output: NDArray[np.float32] = (
-                self.model(input[None, ...])[-1, -1, ...].cpu().numpy()
+                self.model.eval()(input[None, ...])[-1, -1, ...].cpu().numpy()
             )
         # find peaks in the output by fitting gaussian mixture model
         gmm = find_peaks(output, self.window, center=self.window_center)
