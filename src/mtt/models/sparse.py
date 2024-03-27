@@ -153,9 +153,12 @@ class SparseBase(pl.LightningModule, ABC):
         batch_size = x_batch_sizes.shape[0]
         loss = 0
         for batch_idx in range(batch_size):
+            pos_dims = _x[batch_idx].shape[1]
 
             x_dist = torch.cdist(_x[batch_idx], _x[batch_idx], p=2)
-            K_xx = torch.exp(-(x_dist**2) / (2 * sigma**2))
+            K_xx = torch.exp(-(x_dist**2) / (2 * sigma**2)) / (
+                (2 * math.pi * sigma**2) ** (pos_dims / 2)
+            )
             xx = (
                 _x_prob[batch_idx].unsqueeze(-2)
                 @ K_xx
@@ -163,12 +166,16 @@ class SparseBase(pl.LightningModule, ABC):
             ).squeeze(-1)
 
             y_dist = torch.cdist(_y[batch_idx], _y[batch_idx], p=2)
-            K_yy = torch.exp(-(y_dist**2) / (2 * sigma**2))
+            K_yy = torch.exp(-(y_dist**2) / (2 * sigma**2)) / (
+                (2 * math.pi * sigma**2) ** (pos_dims / 2)
+            )
             # assuming that the ground truth is always 1
             yy = K_yy.sum()
 
             cross_dist = torch.cdist(_x[batch_idx], _y[batch_idx], p=2)
-            K_xy = torch.exp(-(cross_dist**2) / (2 * sigma**2))
+            K_xy = torch.exp(-(cross_dist**2) / (2 * sigma**2)) / (
+                (2 * math.pi * sigma**2) ** (pos_dims / 2)
+            )
             xy = (_x_prob[batch_idx].unsqueeze(-2) @ K_xy).sum()
 
             loss += xx + yy - 2 * xy
