@@ -7,6 +7,7 @@ import pytorch_lightning as pl
 import torch
 import torch.nn.functional as F
 from scipy.optimize import linear_sum_assignment
+from torch_geometric.nn.encoding import TemporalEncoding
 
 from mtt.data.sparse import SparseData
 from mtt.utils import add_model_specific_args, compute_ospa
@@ -43,6 +44,7 @@ class SparseBase(pl.LightningModule, ABC):
         input_length: int = 1,
         loss_type: str = "logp",
         mse_sigma: float = 10.0,
+        input_encoding: bool = False,
         **kwargs,
     ):
         """
@@ -65,6 +67,9 @@ class SparseBase(pl.LightningModule, ABC):
         self.loss_type = loss_type
         self.mse_sigma = mse_sigma
 
+        self.encoder_time = TemporalEncoding(16) if input_encoding else None
+        self.time_dim = 16 if input_encoding else 1
+
     def to_stinput(self, data: SparseData) -> SparseInput:
         """
         The input to the model is a tuple of (x, x_pos, x_batch).
@@ -79,7 +84,11 @@ class SparseBase(pl.LightningModule, ABC):
                 # make the sensor positions relative to the measurement positions
                 data.sensor_position - data.measurement_position,
                 # add the temporal index as a feature
-                data.measurement_time[:, None],
+                (
+                    self.encoder_time(data.measurement_time.float())
+                    if self.encoder_time
+                    else data.measurement_time[:, None]
+                ),
             ),
             dim=1,
         )

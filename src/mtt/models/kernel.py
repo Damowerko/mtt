@@ -32,7 +32,7 @@ class KNN(SparseBase):
         self.save_hyperparameters()
         self.model = knn.KNN(
             pos_dim,
-            in_channels=measurement_dim,
+            in_channels=measurement_dim + self.time_dim,
             hidden_channels=hidden_channels,
             out_channels=state_dim + 1,
             n_layers=n_layers,

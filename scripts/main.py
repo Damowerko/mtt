@@ -108,7 +108,7 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
         dataloader_kwargs["collate_fn"] = SparseDataset.collate_fn
 
         # load model
-        model = model_cls(measurement_dim=3, state_dim=2, pos_dim=2, **vars(params))
+        model = model_cls(measurement_dim=2, state_dim=2, pos_dim=2, **vars(params))
 
     else:
         raise RuntimeError(
