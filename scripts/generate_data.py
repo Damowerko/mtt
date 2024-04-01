@@ -61,6 +61,7 @@ def main(args):
                 "unit": "simulation",
                 "smoothing": 0.5,
             },
+            max_workers=args.max_workers,
         )
         # filter out simulations with less than 1 measurement in a 4 step window
         vectors_list = [
@@ -89,6 +90,7 @@ def main(args):
             df_targets, df_measurements, df_sensors = vector_to_df(
                 vectors_list,
                 tqdm_kwargs={"desc": "Converting to dataframes", "unit": "simulation"},
+                max_workers=args.max_workers,
             )
             df_targets.to_parquet(out_dir / "targets.parquet")
             df_measurements.to_parquet(out_dir / "measurements.parquet")
