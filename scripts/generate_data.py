@@ -62,6 +62,13 @@ def main(args):
                 "smoothing": 0.5,
             },
         )
+        # filter out simulations with less than 1 measurement in a 4 step window
+        vectors_list = [
+            v
+            for v in vectors_list
+            if filter_simulation(v, window_width=4, min_measurements=1)
+        ]
+        print(f"Filtered out {args.n_simulations - len(vectors_list)} simulations.")
 
         # save the simulation data
         with (out_dir / "simulations.pkl").open("wb") as f:
@@ -126,6 +133,12 @@ if __name__ == "__main__":
         "--no-images",
         action="store_true",
         help="Don't generate images. Only save the simulation data.",
+    )
+    parser.add_argument(
+        "--max-workers",
+        type=int,
+        default=None,
+        help="Number of workers to use for parallel processing.",
     )
     args = parser.parse_args()
     main(args)

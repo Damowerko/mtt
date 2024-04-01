@@ -37,6 +37,7 @@ def parallel_rollout(
     iterable: Iterable[T],
     n_rollouts=10,
     tqdm_kwargs: dict | None = None,
+    max_workers: int | None = None,
 ) -> List[List[T]]:
     """
     Uses a ProcessPoolExecutor to generate n_rollouts in parallel.
@@ -49,7 +50,7 @@ def parallel_rollout(
         tqdm_kwargs: optional arguments for tqdm progress bar. None to disable.
     """
 
-    with ProcessPoolExecutor() as e:
+    with ProcessPoolExecutor(max_workers) as e:
         if tqdm_kwargs is not None:
             return list(
                 tqdm(

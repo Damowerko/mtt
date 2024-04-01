@@ -215,11 +215,12 @@ class SparseDataset(Dataset):
 def vector_to_df(
     simdata: List[List[SimulationStep]],
     tqdm_kwargs: dict | None = None,
+    max_workers: int | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Convert VectorData into pandas DataFrames. Willl use a ProcessPoolExecutor to parallelize the conversion.
     """
-    with ProcessPoolExecutor() as executor:
+    with ProcessPoolExecutor(max_workers) as executor:
         if tqdm_kwargs is not None:
             dfs = zip(
                 *tqdm(
