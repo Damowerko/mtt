@@ -52,6 +52,7 @@ def main(args):
         print("Simulation data already exists. Loading from disk...")
         with (out_dir / "simulations.pkl").open("rb") as f:
             vectors_list = pickle.load(f)
+        print("Finished loading simulation data.")
     else:
         vectors_list = parallel_rollout(
             online_dataset.sim_generator,
