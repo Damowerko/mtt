@@ -57,5 +57,10 @@ def get_model_class(name: str):
         from mtt.models.kernel import KNN
 
         return KNN
+    elif name == "egnn":
+        from mtt.models.egnn import EGNN
+
+        return EGNN
+
     else:
         raise ValueError(f"Unknown model: {name}.")
