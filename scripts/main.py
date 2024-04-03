@@ -28,7 +28,7 @@ from mtt.simulator import Simulator
 def main():
     parser = argparse.ArgumentParser(conflict_handler="resolve")
     parser.add_argument("operation", type=str, choices=["train", "test", "study"])
-    parser.add_argument("model", type=str, choices=["conv2d", "st", "knn"])
+    parser.add_argument("model", type=str, choices=["conv2d", "st", "knn", "egnn"])
 
     # program arguments
     group = parser.add_argument_group("General")
