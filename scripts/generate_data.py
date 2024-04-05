@@ -20,7 +20,7 @@ def filter_simulation(
 ):
     if min_measurements > 0:
         # the number of measurements within each sample
-        n_measurements = [len(s.measurements) for s in simulation]
+        n_measurements = [sum(map(len, s.measurements)) for s in simulation]
         # the worst case number of measurements within a 20 step window
         n_measurements_min = (
             np.lib.stride_tricks.sliding_window_view(
@@ -64,11 +64,11 @@ def main(args):
             },
             max_workers=args.max_workers,
         )
-        # filter out simulations with less than 1 measurement in a 4 step window
+        # filter out simulations with zero measurements in *ANY* time-step
         vectors_list = [
             v
             for v in vectors_list
-            if filter_simulation(v, window_width=4, min_measurements=1)
+            if filter_simulation(v, window_width=1, min_measurements=1)
         ]
         print(f"Filtered out {args.n_simulations - len(vectors_list)} simulations.")
 
