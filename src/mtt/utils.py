@@ -72,7 +72,8 @@ def to_polar_torch(val) -> torch.Tensor:
     """
     Convert cartesion coordinates to polar coordinates.
     """
-    val = torch.as_tensor(val, dtype=torch.float64)
+    if not torch.is_tensor(val):
+        val = torch.as_tensor(val, dtype=torch.float64)
     shape = val.shape
     val = val.reshape(-1, 2)
     r = torch.norm(val, dim=1)

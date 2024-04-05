@@ -237,7 +237,7 @@ class SparseBase(pl.LightningModule, ABC):
         lr: float = 1e-3,
         weight_decay: float = 0.0,
         ospa_cutoff: float = 500.0,
-        input_length: int = 1,
+        input_length: int = 4,
         loss_type: str = "logp",
         kernel_sigma: float = 10.0,
         **kwargs,
@@ -263,32 +263,30 @@ class SparseBase(pl.LightningModule, ABC):
         self.loss_type = loss_type
         self.kernel_sigma = kernel_sigma
 
-    def forward(
-        self, x: torch.Tensor, x_pos: torch.Tensor, x_batch: torch.Tensor
+    @abstractmethod
+    def forward_input(self, data: SparseData) -> typing.Any:
+        """
+        Parse SparseData to the input format expected by the model.
+        """
+        pass
+
+    @abstractmethod
+    def forward(self, data: typing.Any) -> SparseOutput:
+        """
+        Takes the input in the format returned by `forward_input` and returns `SparseOutput`.
+        """
+        pass
+
+    def forward_output(
+        self,
+        mu: torch.Tensor,
+        sigma: torch.Tensor,
+        logits: torch.Tensor,
+        batch: torch.Tensor,
     ) -> SparseOutput:
-        # apply activation to the output of _forward
-        mu, sigma, logits, batch = self._forward(x, x_pos, x_batch)
-        # Sigma must be > 0.0 for torch.distributions.Normal
         sigma = F.softplus(sigma) + 1e-16
         logp = F.logsigmoid(logits)
         return SparseOutput(mu, sigma, logp, batch)
-
-    @abstractmethod
-    def _forward(
-        self, x: torch.Tensor, x_pos: torch.Tensor, x_batch: torch.Tensor
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Partial implementation of the forward pass.
-        Should have no activation function on the output.
-        The output of this function is used in `self.forward`.
-
-        Returns:
-            mu: (N, d) Predicted states.
-            sigma: (N, d) Covariance of the states.
-            logits: (N,) Existence probabilities in logit space.
-            batch: (B,) The size of each batch in mu, cov, and logp.
-        """
-        raise NotImplementedError()
 
     def logp_loss(
         self,
@@ -455,27 +453,25 @@ class SparseBase(pl.LightningModule, ABC):
             ospa[batch_idx] = compute_ospa(X, Y, self.ospa_cutoff, p=2)
         return ospa.mean()
 
-    def parse_input(self, data: SparseData):
-        return SparseInput.from_sparse_data(data, self.input_length)
-
     def training_step(self, data: SparseData, *_):
-        input = self.parse_input(data)
+        output = self.forward(self.forward_input(data))
         label = SparseLabel.from_sparse_data(data, self.input_length)
-        output = self.forward(*input)
         loss = self.loss(label, output)
         self.log("train/loss", loss, prog_bar=True)
         return loss
 
     def validation_step(self, data: SparseData, *_):
-        input = self.parse_input(data)
+        output = self.forward(self.forward_input(data))
         label = SparseLabel.from_sparse_data(data, self.input_length)
-        output = self.forward(*input)
         loss = self.loss(label, output)
-        self.log("val/loss", loss, prog_bar=True)
 
+        batch_size = output.batch.shape[0]
+        self.log("val/loss", loss, prog_bar=True, batch_size=batch_size)
         ospa = self.ospa(label, output)
-        self.log("val/ospa", ospa, prog_bar=True)
-
+        self.log("val/ospa", ospa, prog_bar=True, batch_size=batch_size)
+        self.log(
+            "val/n_outputs", output.mu.shape[0] / batch_size, batch_size=batch_size
+        )
         return loss
 
     def configure_optimizers(self):

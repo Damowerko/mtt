@@ -7,6 +7,7 @@ import torch.nn.functional as F
 import torch_geometric.nn as gnn
 
 from mtt.models.sparse import SparseBase, SparseData, SparseOutput
+from mtt.utils import add_model_specific_args
 
 
 class EGNNConv(gnn.MessagePassing):
@@ -16,18 +17,34 @@ class EGNNConv(gnn.MessagePassing):
         n_pos: int,
         n_hidden: int,
     ):
-        super().__init__()
+        super().__init__(aggr="mean")
         self.n_hidden = n_hidden
-        self.m_mod = n_mod
-        self.n_mod = n_pos
+        self.n_mod = n_mod
+        self.n_pos = n_pos
 
-        self.mod_mlp = gnn.MLP([2 * n_mod + n_pos, n_hidden], act=nn.LeakyReLU())
+        self.mod_in_norm = nn.BatchNorm1d(2 * n_mod + n_pos)
+
+        self.mod_mlp = gnn.MLP(
+            [2 * n_mod + n_pos, n_hidden],
+            act_first=True,
+            act=nn.LeakyReLU(),
+        )
         self.dir_mlp = gnn.MLP(
-            [n_hidden, n_pos * n_pos], plain_last=True, act=nn.LeakyReLU()
+            [n_hidden, n_pos, n_pos],
+            act_first=True,
+            plain_last=True,
+            act=nn.LeakyReLU(),
         )
         self.update_mlp = gnn.MLP(
-            [n_hidden, n_mod], plain_last=True, act=nn.LeakyReLU()
+            [n_hidden, n_mod, n_mod],
+            act_first=True,
+            plain_last=True,
+            act=nn.LeakyReLU(),
         )
+        # custom initialization of the dir_mlp to be very small
+        with torch.no_grad():
+            for lin in self.dir_mlp.lins:
+                lin.weight /= 1e3
 
     def forward(
         self,
@@ -44,9 +61,9 @@ class EGNNConv(gnn.MessagePassing):
         propagate_out = self.propagate(
             edge_index, f=f, x=x.reshape(-1, x.shape[-2] * 2)
         )
-        m, y = torch.split(propagate_out, [self.n_hidden, self.n_pos_out * 2], dim=-1)
+        m, y = torch.split(propagate_out, [self.n_hidden, self.n_pos * 2], dim=-1)
         g = self.update_mlp(m)
-        y = y.reshape(-1, self.n_pos_out, 2)
+        y = y.reshape(-1, self.n_pos, 2)
         return g, y
 
     def message(
@@ -64,28 +81,30 @@ class EGNNConv(gnn.MessagePassing):
         x_i = x_i.reshape(E, self.n_pos, 2)
 
         f_cat_x = torch.cat([f_j, f_i, (x_i - x_j).norm(dim=-1)], dim=-1)
+        f_cat_x = self.mod_in_norm(f_cat_x)
         # m_ij.shape = (E, n_hidden)
         hidden_ij = self.mod_mlp(f_cat_x)
 
-        x_mat = self.dir_mlp(hidden_ij).reshape(-1, self.n_pos, self.n_pos)
-        x_mat = (
-            x_mat + torch.eye(self.n_pos, self.n_pos, device=x_mat.device)[None, ...]
-        )
+        x_weights = self.dir_mlp(hidden_ij).reshape(-1, self.n_pos, 1)
         # delta_x.shape is (E, n_pos, 2)
-        y_j = x_mat @ (x_i - x_j)
+        y_j = x_weights * (x_i - x_j)
         message = torch.cat([hidden_ij, y_j.reshape(-1, self.n_pos * 2)], dim=-1)
         return message
 
 
 class EGNN(SparseBase):
+    @classmethod
+    def add_model_specific_args(cls, group):
+        return add_model_specific_args(cls, group)
+
     def __init__(
         self,
-        n_features=2,
-        n_positions=2,
-        n_hidden=128,
-        n_layers=4,
-        ratio=0.5,
-        n_neighbors=16,
+        n_features: int = 128,
+        n_positions: int = 16,
+        n_hidden: int = 512,
+        n_layers: int = 4,
+        ratio: float = 0.5,
+        n_neighbors: int = 16,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -126,29 +145,38 @@ class EGNN(SparseBase):
             list[gnn.pool.select.SelectTopK], nn.ModuleList(select)
         )
 
-    def parse_input(self, data: SparseData):
-        return data
-
-    def _forward(self, data: SparseData):
-        positions = data.measurement_position
-
-        # f_in.shape = (N, self.input_length)
+    def forward_input(
+        self, data: SparseData
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         # 1 hot embedding of time
         f = F.one_hot(data.measurement_time, self.input_length).float()
         f = self.f_readin.forward(f)
 
-        # x_in.shape = (N, 2, 2) the last two dimensions are the x,y coordinates
-        x = torch.zeros(data.measurement_position.shape[0], self.n_positions, 2)
-        x[:, 0] = data.measurement_position
-        x[:, 1] = data.sensor_position
+        x = torch.stack(
+            [
+                data.measurement_position,
+                data.sensor_position,
+            ],
+            dim=1,
+        )
+        x = x[:, torch.arange(self.n_positions).remainder(self.n_positions_in), :]
 
+        batch_sizes = data.measurement_batch_sizes
+
+        return x, f, batch_sizes
+
+    def forward(
+        self, input: tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+    ) -> SparseOutput:
+        x, f, batch_sizes = input
         batch_idx = torch.repeat_interleave(
             torch.arange(
-                len(data.measurement_batch_sizes),
-                device=data.measurement_batch_sizes.device,
+                len(batch_sizes),
+                device=batch_sizes.device,
             ),
-            data.measurement_batch_sizes,
+            batch_sizes,
         )
+        positions = x[:, 0, :]
         for i in range(self.n_layers):
             # compute graph based on the positions
             edge_index = gnn.pool.knn_graph(
@@ -157,9 +185,9 @@ class EGNN(SparseBase):
             df, dx = self.egnn[i].forward(f, x, edge_index)
 
             # scale position update
-            C = self.n_neighbors
+            C = self.n_neighbors * 1e3
             f = f + df
-            x = x + dx / C
+            x = x + dx / (C + 1)
             positions = x[:, 0, :]
 
             # node subsampling
@@ -172,5 +200,5 @@ class EGNN(SparseBase):
         mu = positions
         sigma = f[:, 0, None].expand(-1, 2)
         logits = f[:, 1]
-        batch = torch.bincount(batch_idx)
-        return mu, sigma, logits, batch
+        batch_sizes = torch.bincount(batch_idx)
+        return self.forward_output(mu, sigma, logits, batch_sizes)

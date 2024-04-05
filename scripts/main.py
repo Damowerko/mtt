@@ -55,6 +55,7 @@ def main():
     group.add_argument("--patience", type=int, default=10)
     group.add_argument("--profiler", type=str, default=None)
     group.add_argument("--fast_dev_run", action="store_true")
+    group.add_argument("--grad_clip_val", type=float, default=0)
 
     params = parser.parse_args()
     if params.operation == "train":
@@ -261,6 +262,7 @@ def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
         profiler=profiler,
         fast_dev_run=params.fast_dev_run,
         log_every_n_steps=1 if params.slim else 50,
+        gradient_clip_val=params.grad_clip_val,
     )
 
 
