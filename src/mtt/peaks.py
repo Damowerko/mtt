@@ -89,6 +89,20 @@ def sample_image(img: np.ndarray, width: float, center=(0, 0)) -> np.ndarray:
     return XY.reshape(-1, 2)[idx]
 
 
+def sample_rkhs(
+    mu: np.ndarray, weights: np.ndarray, sigma: float, n_samples: int
+) -> np.ndarray:
+    """
+    Sample from a RKHS defined by the means `mu`, weights `weights` and has gaussian kernel with width `sigma`.
+    """
+    n_components = mu.shape[0]
+    n_samples_per_component = np.random.multinomial(n_samples, weights / weights.sum())
+    sample_idx = np.repeat(np.arange(n_components), n_samples_per_component)
+    mu_sampled = mu[sample_idx]
+    samples = np.random.normal(mu_sampled, sigma)
+    return samples
+
+
 def fit_kmeans(samples: np.ndarray, n_components: int, n_components_range=0):
     if n_components == 0:
         return GMM(np.empty((0, 2)), np.empty((0, 2, 2)), np.empty(0))
