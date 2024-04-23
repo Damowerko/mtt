@@ -35,11 +35,12 @@ def main():
     group.add_argument("--no_log", action="store_true")
     group.add_argument("--log_dir", type=str, default="./logs")
     group.add_argument("--data_dir", type=str, default="./data/train")
+    group.add_argument("--notes", type=str, default="")
 
     # model arguments
     model_name = sys.argv[2]
     group = parser.add_argument_group("Model Hyperparameters")
-    get_model_class(sys.argv[2]).add_model_specific_args(group)
+    get_model_class(model_name).add_model_specific_args(group)
 
     # data arguments
     group = parser.add_argument_group("Data")
@@ -216,7 +217,11 @@ def make_trainer(params: argparse.Namespace, callbacks=[]) -> pl.Trainer:
     else:
         # create loggers
         logger = WandbLogger(
-            project="mtt", save_dir="logs", config=params, log_model=True
+            project="mtt",
+            save_dir="logs",
+            config=params,
+            log_model=True,
+            notes=params.notes,
         )
         logger.log_hyperparams(params)
         run = typing.cast(Run, logger.experiment)
