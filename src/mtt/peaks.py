@@ -1,3 +1,4 @@
+from math import floor
 from typing import NamedTuple
 
 import matplotlib.pyplot as plt
@@ -159,7 +160,7 @@ def reweigh(gmm: GMM, n_components):
     For example, if a component has a weight of 2.6, it will be split into 2 components of weight 2 and one component of weight 0.6.
     3. Remove components with a weight smaller than 0.5.
     """
-    weights = gmm.weights * n_components
+    weights = gmm.weights * n_components / gmm.weights.sum()
 
     _idx = []
     _weights = []
@@ -176,6 +177,7 @@ def reweigh(gmm: GMM, n_components):
     idx = np.concatenate(_idx)
     weights = np.concatenate(_weights)
     # get the n_components largest weights
+    n_components = floor(np.round(n_components))
     idx = idx[np.argsort(weights)[::-1][:n_components]]
     weights = weights[np.argsort(weights)[::-1][:n_components]]
     return GMM(gmm.means[idx], gmm.covariances[idx], weights)

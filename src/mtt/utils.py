@@ -1,4 +1,5 @@
 import inspect
+import typing
 from typing import Tuple, Union
 
 import numpy as np
@@ -32,11 +33,18 @@ def add_model_specific_args(cls, group):
     for name, type, default in args:
         if default is inspect.Parameter.empty:
             continue
-        if type not in (int, float, str, bool):
-            continue
         if type == bool:
             group.add_argument(f"--{name}", dest=name, action="store_true")
-        else:
+        elif typing.get_origin(type) == list:
+            type_args = typing.get_args(type)
+            if len(type_args) != 1:
+                continue
+            if type_args[0] not in (int, float, str):
+                continue
+            group.add_argument(
+                f"--{name}", type=type_args[0], nargs="+", default=default
+            )
+        elif type in (int, float, str):
             group.add_argument(f"--{name}", type=type, default=default)
     return group
 

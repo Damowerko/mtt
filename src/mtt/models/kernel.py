@@ -1,21 +1,92 @@
-import typing
-
-import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch_geometric.nn as gnn
 from torch_geometric.nn.pool.select import SelectOutput, SelectTopK
 from torchcps.kernel.nn import (
     GaussianKernel,
+    Kernel,
     KernelConv,
     KernelSample,
     Mixture,
+    sample_kernel,
     solve_kernel,
 )
 
 from mtt.data.sparse import SparseData
-from mtt.models.sparse import SparseBase, SparseInput, SparseOutput
+from mtt.models.sparse import SparseBase
 from mtt.utils import add_model_specific_args, to_polar_torch
+
+
+class Select(nn.Module):
+    def __init__(self, n_channels: int, ratio: float):
+        super().__init__()
+        self.select = SelectTopK(n_channels, ratio)
+
+    def forward(self, x: Mixture):
+        # see: https://pytorch-geometric.readthedocs.io/en/latest/generated/torch_geometric.nn.pool.TopKPooling.html
+        # we have to multiply the output by the score to make this differentiable
+        assert x.batch is not None
+        batch_idx = torch.repeat_interleave(
+            torch.arange(len(x.batch), device=x.batch.device),
+            x.batch,
+        )
+        s: SelectOutput = self.select.forward(x.weights, batch=batch_idx)
+        assert s.weight is not None
+        x = Mixture(
+            x.positions[s.node_index],
+            x.weights[s.node_index] * s.weight[:, None],
+            batch_idx[s.node_index]
+            .histc(len(x.batch), min=0, max=len(x.batch) - 1)
+            .long(),
+        )
+
+
+class Upsample(nn.Module):
+    def __init__(self, kernel: Kernel, ratio: float, sigma: float):
+        """
+        Args:
+            kernel: The kernel to use for the upsampling.
+            ratio: The ratio of new samples to old samples.
+            sigma: The standard deviation of the noise to add to positions.
+        """
+
+        super().__init__()
+        self.kernel = kernel
+        if ratio <= 1.0:
+            raise ValueError("Upsampling ratio must be greater than 1.")
+        self.ratio = ratio
+        self.sigma = sigma
+
+    def forward(self, x: Mixture):
+        assert x.batch is not None
+        # number of original and new samples
+        batch_old = x.batch
+        batch_new = (x.batch * self.ratio).floor().long()
+        split_old = x.batch.cpu().cumsum(0)
+        split_new = x.batch.cpu().cumsum(0)
+        positions = torch.zeros(
+            int(batch_old.sum() + batch_new.sum()), device=x.positions.device
+        )
+        for i in range(len(x.batch)):
+            # [       OLD                 |                NEW  ]
+            # split_new[i] | split_new[i] + n_old[i] | split_new[i+1]
+            slice_old = slice(split_new[i], split_new[i] + batch_old[i])
+            slice_new = slice(split_new[i] + batch_old[i], split_new[i + 1])
+
+            # copy old positions to position in the new array
+            positions_old = x.positions[split_old[i] : split_old[i + 1]]
+            positions[slice_old] = positions_old
+
+            # use randint to sample new positions
+            idx = torch.randint(
+                int(batch_old[i]),
+                int(batch_old[i + 1]),
+                (int(batch_new[i] - batch_old[i]),),
+                device=x.batch.device,
+            )
+            positions[slice_new] = positions_old[idx]
+            positions[slice_new] += torch.randn_like(positions[slice_new]) * self.sigma
+        return sample_kernel(self.kernel, x, positions, batch_new)
 
 
 class KernelEncoderLayer(nn.Module):
@@ -179,7 +250,7 @@ class KNN(SparseBase):
         n_samples: int = 1000,
         n_hidden: int = 32,
         n_hidden_mlp: int = 128,
-        sigma: float = 10.0,
+        sigma: list[float] = [10.0],
         max_filter_kernels: int = 25,
         update_positions: bool = False,
         sample_ratio: float = 1.0,
@@ -188,7 +259,7 @@ class KNN(SparseBase):
         super().__init__(**kwargs)
         self.save_hyperparameters()
         self.n_layers = n_layers
-        self.sigma = sigma
+        self.sigma = sigma * n_layers if len(sigma) == 1 else sigma
         self.n_samples = n_samples
         self.nonlinearity = nn.LeakyReLU()
 
@@ -213,11 +284,11 @@ class KNN(SparseBase):
                     max_filter_kernels,
                     n_hidden,
                     n_hidden_mlp,
-                    sigma,
+                    sigma[l],
                     update_positions,
                     sample_ratio,
                 )
-                for _ in range(n_layers)
+                for l in range(n_layers)
             ]
         )
 
@@ -271,7 +342,7 @@ class KNN(SparseBase):
 
         # positions.shape = (batch_size, n_samples, 2)
         # weights.shape = (batch_size, n_samples, input_length)
-        kernel = GaussianKernel(self.sigma)
+        kernel = GaussianKernel(self.sigma[0])
         mixture = Mixture(positions, weights)
         mixture = solve_kernel(kernel, mixture, alpha=0.001)
         # combine the batch dimension with the sample dimension

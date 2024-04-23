@@ -286,6 +286,8 @@ class SparseBase(pl.LightningModule, ABC):
     ) -> SparseOutput:
         sigma = F.softplus(sigma) + 1e-16
         logp = F.logsigmoid(logits)
+        if self.loss_type == "kernel":
+            logp = logits
         return SparseOutput(mu, sigma, logp, batch)
 
     def logp_loss(
@@ -414,7 +416,7 @@ class SparseBase(pl.LightningModule, ABC):
                     continue
                 loss[batch_idx] = kernel_loss(
                     mu_split[batch_idx],
-                    logp_split[batch_idx].exp(),
+                    logp_split[batch_idx],
                     y_split[batch_idx],
                     self.kernel_sigma,
                 )
