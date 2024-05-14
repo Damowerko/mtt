@@ -174,6 +174,11 @@ def reweigh(gmm: GMM, n_components):
         else:
             # the rest of the components will have a weight of 1
             _weights.append(np.ones(_idx[-1].shape[0]))
+
+    # if there are no components with a weight larger than 1.0, return the original gmm
+    if len(_idx) == 0:
+        return GMM(np.empty((0, 2)), np.empty((0, 2, 2)), np.empty(0))
+
     idx = np.concatenate(_idx)
     weights = np.concatenate(_weights)
     # get the n_components largest weights
