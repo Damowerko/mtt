@@ -1,14 +1,20 @@
 import argparse
 import os
+import pickle
+from pathlib import Path
 from time import time
 from typing import Dict, List
 
+import numpy as np
 import pandas as pd
 import torch
 from tqdm import tqdm
 
-from mtt.data import StackedImageData, build_vector_to_image_dp, image_collate_fn
+from mtt.data.image import stack_images, to_image
+from mtt.data.sim import SimulationStep
+from mtt.data.sparse import SparseDataset
 from mtt.models.convolutional import Conv2dCoder
+from mtt.models.sparse import SparseBase, SparseLabel
 from mtt.models.utils import load_model
 from mtt.peaks import find_peaks
 from mtt.utils import compute_ospa
@@ -51,7 +57,7 @@ def main():
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
-    model, name = load_model(args.model_uri)
+    model, name, params = load_model(args.model_uri)
     output_filename = f"{name}_runtime.csv" if args.runtime else f"{name}.csv"
 
     results: List[pd.DataFrame] = []
@@ -71,65 +77,110 @@ def main():
         df.to_csv(os.path.join(args.output_dir, output_filename), index=False)
 
 
-def test_runtime(model: Conv2dCoder, data_path: str, scale=1):
-    model = model.cuda().eval()
-    t_start = time()
-    datapipe = build_vector_to_image_dp(
-        data_path,
-        unbatch=False,
-        vector_to_image_kwargs=dict(device="cuda", img_size=128 * scale),
-    )
-    # get the next data sample
-    simulation = next(iter(datapipe))
-    dt_load_data = time() - t_start
+def test_runtime(model, data_path: str, scale: int = 1):
+    if isinstance(model, Conv2dCoder):
+        return test_cnn_runtime(model, data_path, scale=scale)
+    else:
+        raise ValueError(f"Model type {type(model)} not supported.")
 
-    simulation_iter = iter(simulation)
+
+@torch.no_grad()
+def test_cnn_runtime(model: Conv2dCoder, data_path: str, scale=1):
+    with open(Path(data_path) / "simulations.pkl", "rb") as f:
+        simulations: list[list[SimulationStep]] = pickle.load(f)
+
+    n_simulations = len(simulations)
+    n_steps = len(simulations[0])
+
     times = []
-    while True:
-        t_start = time()
-        data: StackedImageData | None = next(simulation_iter, None)
-        if data is None:
-            break
-        t_data = time()
+    for sim_idx in tqdm(range(n_simulations)):
+        for start_idx in range(n_steps - model.length + 1):
+            stop_idx = start_idx + model.length
+            t_start = time()
+            images = [
+                to_image(sim, img_size=128 * scale, device="cuda")
+                for sim in simulations[sim_idx][start_idx:stop_idx]
+            ]
+            data = stack_images(images)
+            t_data = time()
 
-        with torch.no_grad():
+            # sync to measure the time to finish computation
             output = model.forward(data.sensor_images.cuda().unsqueeze(0))
-        # sync to measure the time to finish computation
-        torch.cuda.synchronize()
-        t_forward = time()
+            torch.cuda.synchronize()
+            t_forward = time()
 
-        positions_estimates = find_peaks(
-            output[-1, -1].cpu().numpy(),
-            width=data.info[-1]["window"],
-            method="kmeans",
-        ).means
-        t_peaks = time()
+            positions_estimates = find_peaks(
+                output[-1, -1].cpu().numpy(),
+                width=data.info[-1]["window"],
+                method="kmeans",
+            ).means
+            t_peaks = time()
 
-        times += [
-            dict(
-                data=t_data - t_start,
-                forward=t_forward - t_data,
-                peaks=t_peaks - t_forward,
-            )
-        ]
+            times += [
+                dict(
+                    data=t_data - t_start,
+                    forward=t_forward - t_data,
+                    peaks=t_peaks - t_forward,
+                )
+            ]
     df = pd.DataFrame(times)
-    df["load"] = dt_load_data / len(df)
     return df
 
 
-def test_model(model: Conv2dCoder, data_path: str, scale: int = 1):
+def test_model(model, data_path: str, scale: int = 1):
+    if isinstance(model, Conv2dCoder):
+        return test_conv_model(model, data_path, scale=scale)
+    else:
+        raise ValueError(f"Model type {type(model)} not supported.")
+
+
+@torch.no_grad()
+def test_knn_model(model: SparseBase, data_path: str, scale=1):
     model = model.cuda()
-    datapipe = build_vector_to_image_dp(
-        data_path,
-        unbatch=False,
-        vector_to_image_kwargs=dict(device="cuda", img_size=128 * scale),
-    )
+    dataset = SparseDataset(data_path, length=model.length)
     result: List[Dict] = []
-    for simulation_idx, simulation in enumerate(tqdm(datapipe, total=len(datapipe))):
-        for step_idx, data in enumerate(simulation):
-            data: StackedImageData = data
-            with torch.no_grad():
-                output = model.forward(data.sensor_images.cuda().unsqueeze(0))
+    for idx in tqdm(range(len(dataset))):
+        sim_idx, step_idx = dataset.parse_index(idx)
+        data = dataset[idx]
+
+        label = SparseLabel.from_sparse_data(data, model.input_length)
+        output = model.forward(data)
+        # batch size should be one
+        assert output.batch.shape[0] == 1
+        ospa = model.ospa(label, output).item()
+        # "kernel" loss means the energy of the difference between the RKHS functions ||f - g||^2
+        mse = model.loss(label, output, "kernel").item()
+        # TODO: add cardinality to result dict
+        result.append(
+            dict(
+                simulation_idx=sim_idx,
+                step_idx=step_idx,
+                mse=mse,
+                ospa=ospa,
+            )
+        )
+    return pd.DataFrame(result)
+
+
+@torch.no_grad()
+def test_conv_model(model: Conv2dCoder, data_path: str, scale=1):
+    model = model.cuda()
+    with open(Path(data_path) / "simulations.pkl", "rb") as f:
+        simulations: list[list[SimulationStep]] = pickle.load(f)
+
+    n_simulations = len(simulations)
+    n_steps = len(simulations[0])
+
+    result: List[Dict] = []
+    for sim_idx in tqdm(range(n_simulations)):
+        images = [
+            to_image(sim, img_size=128 * scale, device="cuda")
+            for sim in simulations[sim_idx]
+        ]
+        for step_idx in range(n_steps - model.length + 1):
+            data = stack_images(images[step_idx : step_idx + model.length])
+
+            output = model.forward(data.sensor_images.cuda().unsqueeze(0))
 
             mse = (output[-1] - data.target_images[-1]).pow(2).mean().item()
             cardinality_target = model.cardinality_from_image(
@@ -148,7 +199,7 @@ def test_model(model: Conv2dCoder, data_path: str, scale: int = 1):
 
             result.append(
                 dict(
-                    simulation_idx=simulation_idx,
+                    simulation_idx=sim_idx,
                     step_idx=step_idx,
                     mse=mse,
                     cardinality_target=cardinality_target,
