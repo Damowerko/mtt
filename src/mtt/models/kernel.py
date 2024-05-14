@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch_geometric.nn as gnn
+from torch_cluster import grid_cluster
+from torch_geometric.nn.pool import avg_pool_x
 from torch_geometric.nn.pool.select import SelectOutput, SelectTopK
 from torchcps.kernel.nn import (
     GaussianKernel,
@@ -13,8 +15,8 @@ from torchcps.kernel.nn import (
 )
 
 from mtt.data.sparse import SparseData
-from mtt.models.sparse import SparseBase
-from mtt.utils import add_model_specific_args, to_polar_torch
+from mtt.models.sparse import SparseBase, SparseLabel, SparseOutput
+from mtt.utils import add_model_specific_args, compute_ospa, to_polar_torch
 
 
 class Select(nn.Module):
@@ -239,6 +241,9 @@ class KernelDecoderLayer(nn.Module):
         return z
 
 
+from mtt.peaks import GMM, reweigh
+
+
 class KNN(SparseBase):
     @classmethod
     def add_model_specific_args(cls, group):
@@ -284,7 +289,7 @@ class KNN(SparseBase):
                     max_filter_kernels,
                     n_hidden,
                     n_hidden_mlp,
-                    sigma[l],
+                    self.sigma[l],
                     update_positions,
                     sample_ratio,
                 )
@@ -367,6 +372,51 @@ class KNN(SparseBase):
         batch = x.batch
         assert batch is not None
         return self.forward_output(mu, sigma, logits, batch)
+
+    def ospa(self, label: SparseLabel, output: SparseOutput):
+        x_split_idx = output.batch.cumsum(0)[:-1].cpu()
+        y_split_idx = label.batch.cumsum(0)[:-1].cpu()
+        mu_split = output.mu.tensor_split(x_split_idx)
+        sigma_split = output.sigma.tensor_split(x_split_idx)
+        logp_split = output.logp.tensor_split(x_split_idx)
+        y_split = label.y.tensor_split(y_split_idx)
+
+        ospa = torch.zeros((output.batch.shape[0],), device=self.device)
+        for batch_idx in range(output.batch.shape[0]):
+            mu = mu_split[batch_idx]
+            sigma = sigma_split[batch_idx]
+            logp = logp_split[batch_idx]
+            X = self.find_peaks(
+                SparseOutput(
+                    mu, sigma, logp, torch.tensor([mu.shape[0]], device=self.device)
+                )
+            )
+            Y = y_split[batch_idx].detach().cpu().numpy()
+            ospa[batch_idx] = compute_ospa(X, Y, self.ospa_cutoff, p=2)
+        return ospa.mean()
+
+    def find_peaks(self, output: SparseOutput):
+        n_components = output.logp.exp().sum(-1).item()
+        kernel = GaussianKernel(self.kernel_sigma * 2)
+        mu = output.mu.detach()
+        logp = output.logp.detach()
+        X = mu.clone().requires_grad_(True)
+        optimizer = torch.optim.AdamW([X], lr=10, weight_decay=0.0)
+        with torch.enable_grad():
+            for _ in range(100):
+                prob = kernel(X, mu) @ logp.exp()
+                optimizer.zero_grad()
+                (-prob.sum()).backward()
+                optimizer.step()
+        X = X.detach()
+        cluster = grid_cluster(X, torch.full((X.shape[-1],), 10.0, device=X.device))
+        X = avg_pool_x(
+            cluster, X, torch.full(X.shape[:1], 1, device=X.device, dtype=torch.long)
+        )[0]
+        prob = kernel(X, mu) @ logp.exp()
+        mu = X.cpu().numpy()
+        gmm = reweigh(GMM(mu, mu, prob.cpu().numpy()), n_components)
+        return gmm.means
 
 
 def sample_measurement_intensity(
