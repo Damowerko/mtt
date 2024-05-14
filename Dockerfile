@@ -1,4 +1,5 @@
-FROM damowerko/torchcps:latest
+ARG REPOSITORY="docker.io"
+FROM ${REPOSITORY}/damowerko/torchcps:latest
 
 # set working directory to repository directory
 RUN mkdir /home/$USER/mtt
