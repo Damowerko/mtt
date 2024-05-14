@@ -46,7 +46,7 @@ def main():
     group = parser.add_argument_group("Data")
     group.add_argument("--batch_size", type=int, default=32)
     group.add_argument("--files_per_epoch", type=int, default=1000)
-    group.add_argument("--num_workers", type=int, default=os.cpu_count())
+    group.add_argument("--num_workers", type=int, default=min(os.cpu_count() or 32, 32))
     group.add_argument("--input_length", type=int, default=20)
     group.add_argument("--slim", action="store_true")
 
