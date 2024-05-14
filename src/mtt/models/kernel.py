@@ -1,3 +1,7 @@
+import math
+from typing import NamedTuple
+
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch_geometric.nn as gnn
@@ -16,6 +20,7 @@ from torchcps.kernel.nn import (
 
 from mtt.data.sparse import SparseData
 from mtt.models.sparse import SparseBase, SparseLabel, SparseOutput
+from mtt.peaks import GMM, reweigh
 from mtt.utils import add_model_specific_args, compute_ospa, to_polar_torch
 
 
@@ -165,86 +170,89 @@ class KernelEncoderLayer(nn.Module):
         return x_out
 
 
-class KernelDecoderLayer(nn.Module):
-    def __init__(
-        self,
-        pos_dim: int,
-        max_filter_kernels: int,
-        n_channels: int,
-        n_channels_mlp: int,
-        sigma_cross: float,
-        sigma_self: float,
-        update_positions: bool,
-    ):
-        super().__init__()
-        self.cross_conv = KernelConv(
-            max_filter_kernels,
-            n_channels,
-            n_channels,
-            pos_dim,
-            kernel_spread=sigma_cross,
-            update_positions=update_positions,
-            kernel_init="grid",
-        )
-        self.sample_cross = KernelSample(
-            kernel=GaussianKernel(sigma_cross),
-            nonlinearity=nn.LeakyReLU(),
-            normalize=False,
-        )
-        self.norm_cross = nn.BatchNorm1d(n_channels)
-        self.conv_self = KernelConv(
-            max_filter_kernels,
-            n_channels,
-            n_channels,
-            pos_dim,
-            kernel_spread=sigma_self,
-            update_positions=update_positions,
-            kernel_init="grid",
-        )
-        self.sample_self = KernelSample(
-            kernel=GaussianKernel(sigma_self),
-            nonlinearity=nn.LeakyReLU(),
-            normalize=False,
-        )
-        self.norm_self = nn.BatchNorm1d(n_channels)
-        self.mlp_self = gnn.MLP(
-            [n_channels, n_channels_mlp, n_channels + pos_dim],
-            act=nn.LeakyReLU(),
-            norm="batch_norm",
-            act_first=True,
-            plain_last=True,
-        )
+def kernel_loss(x: torch.Tensor, w: torch.Tensor, y: torch.Tensor, sigma: float):
+    """
+    Assumes that x and y are centers of gaussian pulses with variance sigma^2. Computes the MSE loss between the two.
+    ||x-y||^2 = ||x||^2 + ||y||^2 - 2<x,y>
+    ArgsL
+        x: (N, d) Predicted positions.
+        w: (N, d) Weights.
+        y: (M, d) Ground truth positions.
+    """
 
-    def forward(self, z: Mixture, e: Mixture):
-        # convolve e and sample at z.positions
-        e_conv = self.cross_conv.forward(e)
-        e_sampled = self.sample_cross.forward(e_conv, z.positions, z.batch)
-        e_sampled = e_sampled.map_weights(self.norm_cross)
+    pos_dims = x.shape[1]
+    x_dist = torch.cdist(x, x, p=2)
+    K_xx = torch.exp(-(x_dist**2) / (2 * sigma**2)) / (
+        (2 * math.pi * sigma**2) ** (pos_dims / 2)
+    )
+    xx = (w.unsqueeze(-2) @ K_xx @ w.unsqueeze(-1)).squeeze(-1)
 
-        # z = z + e_sampled
-        z = z.map_weights(e_sampled.weights.add)
-        # z -> conv -> sample -> norm -> +z
-        z_conv = self.conv_self.forward(z)
-        z_sampled = self.sample_self.forward(z_conv, z.positions, z.batch)
-        z_sampled = z_sampled.map_weights(self.norm_self)
-        z = z.map_weights(z_sampled.weights.add)
-        # use mlp to update z weights and positions
-        mlp_out = self.mlp_self.forward(z.weights)
-        delta_positions, delta_weights = torch.split(
-            mlp_out, [z.positions.shape[-1], z.weights.shape[-1]], dim=-1
-        )
-        z = Mixture(
-            z.positions + delta_positions,
-            z.weights + delta_weights,
-            z.batch,
-        )
-        return z
+    y_dist = torch.cdist(y, y, p=2)
+    K_yy = torch.exp(-(y_dist**2) / (2 * sigma**2)) / (
+        (2 * math.pi * sigma**2) ** (pos_dims / 2)
+    )
+    # assuming that the ground truth is always 1
+    yy = K_yy.sum()
+
+    cross_dist = torch.cdist(x, y, p=2)
+    K_xy = torch.exp(-(cross_dist**2) / (2 * sigma**2)) / (
+        (2 * math.pi * sigma**2) ** (pos_dims / 2)
+    )
+    xy = (w.unsqueeze(-2) @ K_xy).sum()
+
+    loss = xx + yy - 2 * xy
+    return loss.squeeze()
 
 
-from mtt.peaks import GMM, reweigh
+def scaled_logsumexp(x: torch.Tensor, dims: int | tuple[int, ...] = -1):
+    """
+    Compute the logsumexp of x with scaling.
+    """
+    if isinstance(dims, int):
+        dims = (dims,)
+    max_x = x
+    for dim in dims:
+        max_x, _ = torch.max(max_x, dim=dim, keepdim=True)
+    return max_x.squeeze(dims) + torch.logsumexp(x - max_x, dim=dims)
 
 
-class KNN(SparseBase):
+def log_kernel_loss(x: torch.Tensor, logw: torch.Tensor, y: torch.Tensor, sigma: float):
+    """
+    Same as `kernel` loss but in log-space. Assumes that x and y are centers of gaussian pulses with variance sigma^2. Computes the MSE loss between the two in log-space.
+    ||x-y||^2 = logsumexp( log(||x||^2) + log(||y||^2) - log(2<x,y>) )
+
+    Args:
+        x: (N, d) Predicted states.
+        logw: (N,) Weights in log-space.
+        y: (M, d) Ground truth states.
+        sigma: float The variance of the gaussian kernel to use.
+    """
+
+    pos_dims = x.shape[1]
+    x_dist = torch.cdist(x, x, p=2)
+    K_xx = (-(x_dist**2) / (2 * sigma**2)) - math.log(
+        (2 * math.pi * sigma**2) ** (pos_dims / 2)
+    )
+    xx = scaled_logsumexp(logw[:, None] + K_xx + logw[None, :], dims=(-1, -2))
+
+    y_dist = torch.cdist(y, y, p=2)
+    K_yy = (-(y_dist**2) / (2 * sigma**2)) - math.log(
+        (2 * math.pi * sigma**2) ** (pos_dims / 2)
+    )
+    # assuming that the ground truth is always 1
+    yy = scaled_logsumexp(K_yy, dims=(-1, -2))
+
+    cross_dist = torch.cdist(x, y, p=2)
+    K_xy = (-(cross_dist**2) / (2 * sigma**2)) - math.log(
+        (2 * math.pi * sigma**2) ** (pos_dims / 2)
+    )
+    xy = scaled_logsumexp(logw[:, None] + K_xy, dims=(-1, -2))
+
+    loss = torch.logsumexp(torch.stack((xx, yy, -2 * xy), dim=-1), dim=-1)
+    return loss
+
+
+class KNN(pl.LightningModule):
     @classmethod
     def add_model_specific_args(cls, group):
         return add_model_specific_args(cls, group)
@@ -259,6 +267,12 @@ class KNN(SparseBase):
         max_filter_kernels: int = 25,
         update_positions: bool = False,
         sample_ratio: float = 1.0,
+        lr: float = 1e-3,
+        weight_decay: float = 1e-4,
+        ospa_cutoff: float = 10.0,
+        input_length: int = 10,
+        logloss: bool = False,
+        kernel_sigma: float = 10.0,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -270,6 +284,12 @@ class KNN(SparseBase):
             self.sigma = sigma * n_layers if len(sigma) == 1 else sigma
         self.n_samples = n_samples
         self.nonlinearity = nn.LeakyReLU()
+        self.learning_rate = lr
+        self.weight_decay = weight_decay
+        self.ospa_cutoff = ospa_cutoff
+        self.input_length = input_length
+        self.logloss = logloss
+        self.kernel_sigma = kernel_sigma
 
         in_channels = self.input_length
         out_channels = 2  # sigma, logp
@@ -363,63 +383,142 @@ class KNN(SparseBase):
         )
         return mixture
 
-    def forward(self, x: Mixture):
+    def forward(self, x: Mixture) -> Mixture:
         x = x.map_weights(self.readin.forward)
         x = self.convolutions(x)
         x = x.map_weights(self.readout.forward)
+        # relu activation on weights
+        x = x.map_weights(nn.functional.relu)
+        return x
 
-        # interpret the output as a mixture of Gaussians
-        mu = x.positions
-        sigma = x.weights[:, 0, None].expand(-1, 2)
-        logits = x.weights[:, 1]
-        batch = x.batch
-        assert batch is not None
-        return self.forward_output(mu, sigma, logits, batch)
+    def training_step(self, batch, *_):
+        output = self.forward(self.forward_input(batch))
+        assert output.batch is not None
+        batch_size = output.batch.shape[0]
+        label = SparseLabel.from_sparse_data(batch, self.input_length)
+        loss = self.loss(label, output)
+        self.log("train/loss", loss, prog_bar=True, batch_size=batch_size)
+        return loss
 
-    def ospa(self, label: SparseLabel, output: SparseOutput):
+    def validation_step(self, batch, *_):
+        output = self.forward(self.forward_input(batch))
+        assert output.batch is not None
+        batch_size = output.batch.shape[0]
+        label = SparseLabel.from_sparse_data(batch, self.input_length)
+        loss = self.loss(label, output)
+        ospa = self.ospa(label, output)
+        self.log("val/loss", loss, prog_bar=True, batch_size=batch_size)
+        self.log("val/ospa", ospa, prog_bar=True, batch_size=batch_size)
+        assert output.batch is not None
+        self.log(
+            "val/n_outputs",
+            output.positions.shape[0] / batch_size,
+            prog_bar=True,
+            batch_size=batch_size,
+        )
+        return loss
+
+    def loss(
+        self,
+        label: SparseLabel,
+        output: Mixture,
+    ):
+        assert output.batch is not None
         x_split_idx = output.batch.cumsum(0)[:-1].cpu()
         y_split_idx = label.batch.cumsum(0)[:-1].cpu()
-        mu_split = output.mu.tensor_split(x_split_idx)
-        sigma_split = output.sigma.tensor_split(x_split_idx)
-        logp_split = output.logp.tensor_split(x_split_idx)
+
+        pos_split = output.positions.tensor_split(x_split_idx)
+        weights_split = output.weights.tensor_split(x_split_idx)
+        y_split = label.y.tensor_split(y_split_idx)
+
+        batch_size = output.batch.shape[0]
+        loss = torch.zeros((batch_size,), device=self.device)
+        for batch_idx in range(batch_size):
+            if self.logloss:
+                loss[batch_idx] = log_kernel_loss(
+                    pos_split[batch_idx],
+                    weights_split[batch_idx].relu().log(),
+                    y_split[batch_idx],
+                    self.kernel_sigma,
+                )
+            else:
+                loss[batch_idx] = kernel_loss(
+                    pos_split[batch_idx],
+                    weights_split[batch_idx],
+                    y_split[batch_idx],
+                    self.kernel_sigma,
+                )
+        return loss.mean()
+
+    def ospa(self, label: SparseLabel, output: Mixture):
+        assert output.batch is not None
+        x_split_idx = output.batch.cumsum(0)[:-1].cpu()
+        y_split_idx = label.batch.cumsum(0)[:-1].cpu()
+
+        pos_split = output.positions.tensor_split(x_split_idx)
+        weights_split = output.weights.tensor_split(x_split_idx)
         y_split = label.y.tensor_split(y_split_idx)
 
         ospa = torch.zeros((output.batch.shape[0],), device=self.device)
         for batch_idx in range(output.batch.shape[0]):
-            mu = mu_split[batch_idx]
-            sigma = sigma_split[batch_idx]
-            logp = logp_split[batch_idx]
-            X = self.find_peaks(
-                SparseOutput(
-                    mu, sigma, logp, torch.tensor([mu.shape[0]], device=self.device)
-                )
-            )
+            X = self.find_peaks(Mixture(pos_split[batch_idx], weights_split[batch_idx]))
             Y = y_split[batch_idx].detach().cpu().numpy()
             ospa[batch_idx] = compute_ospa(X, Y, self.ospa_cutoff, p=2)
         return ospa.mean()
 
-    def find_peaks(self, output: SparseOutput):
-        n_components = output.logp.exp().sum(-1).item()
+    def find_peaks(self, output: Mixture):
+        n_components = output.weights.sum(-1).item()
         kernel = GaussianKernel(self.kernel_sigma * 2)
-        mu = output.mu.detach()
-        logp = output.logp.detach()
-        X = mu.clone().requires_grad_(True)
+        pos = output.positions.detach()
+        weights = output.weights.detach()
+        X = pos.clone().requires_grad_(True)
         optimizer = torch.optim.AdamW([X], lr=10, weight_decay=0.0)
         with torch.enable_grad():
             for _ in range(100):
-                prob = kernel(X, mu) @ logp.exp()
+                # the evaluation of the RKHS at pos is the "likelyhood"
+                likelyhood = kernel(X, pos) @ weights
                 optimizer.zero_grad()
-                (-prob.sum()).backward()
+                (-likelyhood.sum()).backward()
                 optimizer.step()
         X = X.detach()
         cluster = grid_cluster(X, torch.full((X.shape[-1],), 10.0, device=X.device))
         X = avg_pool_x(
             cluster, X, torch.full(X.shape[:1], 1, device=X.device, dtype=torch.long)
         )[0]
-        prob = kernel(X, mu) @ logp.exp()
+        likelyhood = kernel(X, pos) @ weights
         mu = X.cpu().numpy()
-        gmm = reweigh(GMM(mu, mu, prob.cpu().numpy()), n_components)
+        gmm = reweigh(GMM(mu, mu, likelyhood.cpu().numpy()), n_components)
         return gmm.means
+
+    def configure_optimizers(self):
+        # get all parameters that are KernelConv.kernel_positions
+        position_parameters = [
+            parameter
+            for name, parameter in self.named_parameters()
+            if "kernel_positions" in name
+        ]
+        # all other parameters
+        other_parameters = [
+            parameter
+            for name, parameter in self.named_parameters()
+            if "kernel_positions" not in name
+        ]
+        return torch.optim.AdamW(
+            [
+                {
+                    "params": other_parameters,
+                    "lr": self.learning_rate,
+                    "weight_decay": self.weight_decay,
+                },
+                # we don't want regularization on positions
+                # also learning rate is 10 times smaller
+                {
+                    "params": position_parameters,
+                    "lr": self.learning_rate * 0.1,
+                    "weight_decay": 0.0,
+                },
+            ]
+        )
 
 
 def sample_measurement_intensity(

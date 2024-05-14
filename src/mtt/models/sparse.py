@@ -99,86 +99,6 @@ def logp_loss(
     return -logp
 
 
-def kernel_loss(x: torch.Tensor, x_prob: torch.Tensor, y: torch.Tensor, sigma: float):
-    """
-    Assumes that x and y are centers of gaussian pulses with variance sigma^2. Computes the MSE loss between the two.
-    ||x-y||^2 = ||x||^2 + ||y||^2 - 2<x,y>
-    """
-
-    pos_dims = x.shape[1]
-    x_dist = torch.cdist(x, x, p=2)
-    K_xx = torch.exp(-(x_dist**2) / (2 * sigma**2)) / (
-        (2 * math.pi * sigma**2) ** (pos_dims / 2)
-    )
-    xx = (x_prob.unsqueeze(-2) @ K_xx @ x_prob.unsqueeze(-1)).squeeze(-1)
-
-    y_dist = torch.cdist(y, y, p=2)
-    K_yy = torch.exp(-(y_dist**2) / (2 * sigma**2)) / (
-        (2 * math.pi * sigma**2) ** (pos_dims / 2)
-    )
-    # assuming that the ground truth is always 1
-    yy = K_yy.sum()
-
-    cross_dist = torch.cdist(x, y, p=2)
-    K_xy = torch.exp(-(cross_dist**2) / (2 * sigma**2)) / (
-        (2 * math.pi * sigma**2) ** (pos_dims / 2)
-    )
-    xy = (x_prob.unsqueeze(-2) @ K_xy).sum()
-
-    loss = xx + yy - 2 * xy
-    return loss.squeeze()
-
-
-def scaled_logsumexp(x: torch.Tensor, dims: int | tuple[int, ...] = -1):
-    """
-    Compute the logsumexp of x with scaling.
-    """
-    if isinstance(dims, int):
-        dims = (dims,)
-    max_x = x
-    for dim in dims:
-        max_x, _ = torch.max(max_x, dim=dim, keepdim=True)
-    return max_x.squeeze(dims) + torch.logsumexp(x - max_x, dim=dims)
-
-
-def log_kernel_loss(
-    x: torch.Tensor, x_logp: torch.Tensor, y: torch.Tensor, sigma: float
-):
-    """
-    Same as `kernel` loss but in log-space. Assumes that x and y are centers of gaussian pulses with variance sigma^2. Computes the MSE loss between the two in log-space.
-    ||x-y||^2 = logsumexp( log(||x||^2) + log(||y||^2) - log(2<x,y>) )
-
-    Args:
-        x: (N, d) Predicted states.
-        x_logp: (N,) Existence probabilities in log-space.
-        y: (M, d) Ground truth states.
-        sigma: float The variance of the gaussian kernel to use.
-    """
-
-    pos_dims = x.shape[1]
-    x_dist = torch.cdist(x, x, p=2)
-    K_xx = (-(x_dist**2) / (2 * sigma**2)) - math.log(
-        (2 * math.pi * sigma**2) ** (pos_dims / 2)
-    )
-    xx = scaled_logsumexp(x_logp[:, None] + K_xx + x_logp[None, :], dims=(-1, -2))
-
-    y_dist = torch.cdist(y, y, p=2)
-    K_yy = (-(y_dist**2) / (2 * sigma**2)) - math.log(
-        (2 * math.pi * sigma**2) ** (pos_dims / 2)
-    )
-    # assuming that the ground truth is always 1
-    yy = scaled_logsumexp(K_yy, dims=(-1, -2))
-
-    cross_dist = torch.cdist(x, y, p=2)
-    K_xy = (-(cross_dist**2) / (2 * sigma**2)) - math.log(
-        (2 * math.pi * sigma**2) ** (pos_dims / 2)
-    )
-    xy = scaled_logsumexp(x_logp[:, None] + K_xy, dims=(-1, -2))
-
-    loss = torch.logsumexp(torch.stack((xx, yy, -2 * xy), dim=-1), dim=-1)
-    return loss
-
-
 def mse_loss(
     x: torch.Tensor,
     y: torch.Tensor,
@@ -400,9 +320,7 @@ class SparseBase(pl.LightningModule, ABC):
             output: The model output.
             loss_type: The type of loss to use. Either "logp" or "kernel" or "mse" or "logp_kernel".
                 - "logp": The negative log-likelihood of the assignment between mu and y.
-                - "kernel": The mean squared error between the RKHS functions defined by label and output.
                 - "mse": (OSPA) The mean squared error between the optimal assignment between mu and y.
-                - "log_kernel": The mean squared error between the RKHS functions defined by label and output in log-space.
 
         """
 
@@ -429,32 +347,12 @@ class SparseBase(pl.LightningModule, ABC):
                     y_split[batch_idx],
                     (i, j),
                 )
-        elif loss_type == "kernel":
-            for batch_idx in range(batch_size):
-                if len(mu_split) == 0:
-                    continue
-                loss[batch_idx] = kernel_loss(
-                    mu_split[batch_idx],
-                    logp_split[batch_idx].exp(),
-                    y_split[batch_idx],
-                    self.kernel_sigma,
-                )
         elif loss_type == "mse":
             for batch_idx, i, j in parallel_assignment(mu_split, y_split):
                 if len(mu_split) == 0:
                     continue
                 loss[batch_idx] = mse_loss(
                     mu_split[batch_idx], y_split[batch_idx], (i, j)
-                )
-        elif loss_type == "log_kernel":
-            for batch_idx in range(batch_size):
-                if len(mu_split[batch_idx]) == 0:
-                    continue
-                loss[batch_idx] = log_kernel_loss(
-                    mu_split[batch_idx],
-                    logp_split[batch_idx],
-                    y_split[batch_idx],
-                    self.kernel_sigma,
                 )
         return loss.mean()
 
