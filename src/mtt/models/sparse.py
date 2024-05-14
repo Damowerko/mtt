@@ -386,7 +386,26 @@ class SparseBase(pl.LightningModule, ABC):
         loss = logp + position_loss
         return loss
 
-    def loss(self, label: SparseLabel, output: SparseOutput, ospa: bool = False):
+    def loss(
+        self,
+        label: SparseLabel,
+        output: SparseOutput,
+        loss_type: str,
+    ):
+        """
+        Compute the loss between the label and the output. There are several types of loss functions that can be used.
+
+        Args:
+            label: The ground truth label.
+            output: The model output.
+            loss_type: The type of loss to use. Either "logp" or "kernel" or "mse" or "logp_kernel".
+                - "logp": The negative log-likelihood of the assignment between mu and y.
+                - "kernel": The mean squared error between the RKHS functions defined by label and output.
+                - "mse": (OSPA) The mean squared error between the optimal assignment between mu and y.
+                - "log_kernel": The mean squared error between the RKHS functions defined by label and output in log-space.
+
+        """
+
         # tensor_split expects indices at which to split tensor
         # they must be on the CPU
         x_split_idx = output.batch.cumsum(0)[:-1].cpu()
@@ -399,7 +418,7 @@ class SparseBase(pl.LightningModule, ABC):
         batch_size = output.batch.shape[0]
         loss = torch.zeros((batch_size,), device=self.device)
 
-        if self.loss_type == "logp":
+        if loss_type == "logp":
             for batch_idx, i, j in parallel_assignment(mu_split, y_split, logp_split):
                 if len(mu_split) == 0:
                     continue
@@ -410,7 +429,7 @@ class SparseBase(pl.LightningModule, ABC):
                     y_split[batch_idx],
                     (i, j),
                 )
-        elif self.loss_type == "kernel":
+        elif loss_type == "kernel":
             for batch_idx in range(batch_size):
                 if len(mu_split) == 0:
                     continue
@@ -420,14 +439,14 @@ class SparseBase(pl.LightningModule, ABC):
                     y_split[batch_idx],
                     self.kernel_sigma,
                 )
-        elif self.loss_type == "mse":
+        elif loss_type == "mse":
             for batch_idx, i, j in parallel_assignment(mu_split, y_split):
                 if len(mu_split) == 0:
                     continue
                 loss[batch_idx] = mse_loss(
                     mu_split[batch_idx], y_split[batch_idx], (i, j)
                 )
-        elif self.loss_type == "log_kernel":
+        elif loss_type == "log_kernel":
             for batch_idx in range(batch_size):
                 if len(mu_split[batch_idx]) == 0:
                     continue
@@ -458,14 +477,14 @@ class SparseBase(pl.LightningModule, ABC):
     def training_step(self, data: SparseData, *_):
         output = self.forward(self.forward_input(data))
         label = SparseLabel.from_sparse_data(data, self.input_length)
-        loss = self.loss(label, output)
+        loss = self.loss(label, output, self.loss_type)
         self.log("train/loss", loss, prog_bar=True)
         return loss
 
     def validation_step(self, data: SparseData, *_):
         output = self.forward(self.forward_input(data))
         label = SparseLabel.from_sparse_data(data, self.input_length)
-        loss = self.loss(label, output)
+        loss = self.loss(label, output, self.loss_type)
 
         batch_size = output.batch.shape[0]
         self.log("val/loss", loss, prog_bar=True, batch_size=batch_size)
