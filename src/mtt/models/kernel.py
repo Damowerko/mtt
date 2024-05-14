@@ -264,7 +264,10 @@ class KNN(SparseBase):
         super().__init__(**kwargs)
         self.save_hyperparameters()
         self.n_layers = n_layers
-        self.sigma = sigma * n_layers if len(sigma) == 1 else sigma
+        if isinstance(sigma, float):
+            self.sigma = [sigma] * n_layers
+        else:
+            self.sigma = sigma * n_layers if len(sigma) == 1 else sigma
         self.n_samples = n_samples
         self.nonlinearity = nn.LeakyReLU()
 
