@@ -267,9 +267,9 @@ class SpatialTransformer(SparseBase):
 
     def __init__(
         self,
-        measurement_dim: int,
-        state_dim: int,
-        pos_dim: int,
+        measurement_dim: int = 2,
+        state_dim: int = 2,
+        pos_dim: int = 2,
         n_channels: int = 32,
         n_encoder: int = 2,
         n_decoder: int = 2,

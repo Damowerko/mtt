@@ -20,6 +20,7 @@ from wandb.wandb_run import Run
 from mtt.data.image import OnlineImageDataset, build_image_dp, collate_image_fn
 from mtt.data.sparse import SparseDataset
 from mtt.models.convolutional import EncoderDecoder
+from mtt.models.kernel import KNN
 from mtt.models.sparse import SparseBase
 from mtt.models.utils import get_model_class
 from mtt.simulator import Simulator
@@ -99,19 +100,16 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
         # load model
         model = model_cls(**vars(params))
 
-    elif issubclass(model_cls, SparseBase):
+    elif issubclass(model_cls, (SparseBase, KNN)):
         # Prepare Sparse Dataset
         dataset = SparseDataset(params.data_dir, params.input_length, params.slim)
         train_dataset, val_dataset = random_split(
             dataset, [0.95, 0.05], generator=torch.Generator().manual_seed(42)
         )
-
         # collate function for sparse data
         dataloader_kwargs["collate_fn"] = SparseDataset.collate_fn
-
         # load model
-        model = model_cls(measurement_dim=2, state_dim=2, pos_dim=2, **vars(params))
-
+        model = model_cls(**vars(params))
     else:
         raise RuntimeError(
             f"{params.model} is neither a convolutional nor sparse model."
