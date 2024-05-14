@@ -435,7 +435,7 @@ class SparseBase(pl.LightningModule, ABC):
                     continue
                 loss[batch_idx] = kernel_loss(
                     mu_split[batch_idx],
-                    logp_split[batch_idx],
+                    logp_split[batch_idx].exp(),
                     y_split[batch_idx],
                     self.kernel_sigma,
                 )
