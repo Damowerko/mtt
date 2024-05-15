@@ -19,7 +19,7 @@ from torchcps.kernel.nn import (
 )
 
 from mtt.data.sparse import SparseData
-from mtt.models.sparse import SparseBase, SparseLabel, SparseOutput
+from mtt.models.sparse import SparseLabel
 from mtt.peaks import GMM, reweigh
 from mtt.utils import add_model_specific_args, compute_ospa, to_polar_torch
 
@@ -173,36 +173,38 @@ class KernelEncoderLayer(nn.Module):
         return x_out
 
 
-# def kernel_loss(x: torch.Tensor, w: torch.Tensor, y: torch.Tensor, kernel: Kernel):
-#     """
-#     Assumes that x and y are centers of gaussian pulses with variance sigma^2. Computes the MSE loss between the two.
-#     ||x-y||^2 = ||x||^2 + ||y||^2 - 2<x,y>
-#     ArgsL
-#         x: (N, d) Predicted positions.
-#         w: (N, d) Weights.
-#         y: (M, d) Ground truth positions.
-#     """
-#     if x.shape[0] == 0:
-#         xx = 0
-#     else:
-#         K_xx = kernel(x, x)
-#         xx = (w.mT @ (K_xx @ w)).squeeze(-1)
+def kernel_loss_keops(
+    x: torch.Tensor, w: torch.Tensor, y: torch.Tensor, kernel: Kernel
+):
+    """
+    Assumes that x and y are centers of gaussian pulses with variance sigma^2. Computes the MSE loss between the two.
+    ||x-y||^2 = ||x||^2 + ||y||^2 - 2<x,y>
+    ArgsL
+        x: (N, d) Predicted positions.
+        w: (N, d) Weights.
+        y: (M, d) Ground truth positions.
+    """
+    if x.shape[0] == 0:
+        xx = 0
+    else:
+        K_xx = kernel(x, x)
+        xx = (w.mT @ (K_xx @ w)).squeeze(-1)
 
-#     if y.shape[0] == 0:
-#         yy = 0
-#     else:
-#         K_yy = kernel(y, y)
-#         # assuming that the ground truth is always 1
-#         yy = (K_yy @ torch.ones(K_yy.shape[0], device=y.device)).sum()
+    if y.shape[0] == 0:
+        yy = 0
+    else:
+        K_yy = kernel(y, y)
+        # assuming that the ground truth is always 1
+        yy = (K_yy @ torch.ones(K_yy.shape[0], device=y.device)).sum()
 
-#     if x.shape[0] == 0 or y.shape[0] == 0:
-#         xy = 0
-#     else:
-#         K_yx = kernel(y, x)
-#         xy = (K_yx @ w).sum()
+    if x.shape[0] == 0 or y.shape[0] == 0:
+        xy = 0
+    else:
+        K_yx = kernel(y, x)
+        xy = (K_yx @ w).sum()
 
-#     loss = xx + yy - 2 * xy
-#     return loss
+    loss = xx + yy - 2 * xy
+    return loss
 
 
 def kernel_loss(x: torch.Tensor, w: torch.Tensor, y: torch.Tensor, sigma: float):
@@ -301,6 +303,7 @@ class RKHSBase(pl.LightningModule):
         logloss: bool = False,
         kernel_sigma: float = 10.0,
         n_samples: int = 1000,
+        cardinality_weight: float = 0.0,
         **kwargs,
     ):
         super().__init__()
@@ -312,6 +315,7 @@ class RKHSBase(pl.LightningModule):
         self.logloss = logloss
         self.kernel_sigma = kernel_sigma
         self.n_samples = n_samples
+        self.cardinality_weight = cardinality_weight
 
     def forward(self, batch: Mixture) -> Mixture:
         raise NotImplementedError("Implement forward method.")
@@ -379,22 +383,28 @@ class RKHSBase(pl.LightningModule):
         )
         return mixture
 
-    def training_step(self, batch, *_):
+    def training_step(self, batch: SparseData, *_):
         output = self.forward(self.forward_input(batch))
         assert output.batch is not None
         batch_size = output.batch.shape[0]
         label = SparseLabel.from_sparse_data(batch, self.input_length)
-        loss = self.loss(label, output)
+        function_mse, cardinality_mse = self.loss(label, output)
+        loss = function_mse + cardinality_mse * self.cardinality_weight
+        self.log("train/function_mse", function_mse, batch_size=batch_size)
+        self.log("train/cardinality_mse", cardinality_mse, batch_size=batch_size)
         self.log("train/loss", loss, prog_bar=True, batch_size=batch_size)
         return loss
 
-    def validation_step(self, batch, *_):
+    def validation_step(self, batch: SparseData, *_):
         output = self.forward(self.forward_input(batch))
         assert output.batch is not None
         batch_size = output.batch.shape[0]
         label = SparseLabel.from_sparse_data(batch, self.input_length)
-        loss = self.loss(label, output)
+        rkhs_mse, cardinality_mse = self.loss(label, output)
+        loss = rkhs_mse + cardinality_mse * self.cardinality_weight
         ospa = self.ospa(label, output)
+        self.log("val/function_mse", rkhs_mse, batch_size=batch_size)
+        self.log("val/cardinality_mse", cardinality_mse, batch_size=batch_size)
         self.log("val/loss", loss, prog_bar=True, batch_size=batch_size)
         self.log("val/ospa", ospa, prog_bar=True, batch_size=batch_size)
         assert output.batch is not None
@@ -420,23 +430,36 @@ class RKHSBase(pl.LightningModule):
         y_split = label.y.tensor_split(y_split_idx)
 
         batch_size = output.batch.shape[0]
-        loss = torch.zeros((batch_size,), device=self.device)
+        rkhs_mse = torch.zeros((batch_size,), device=self.device)
         for batch_idx in range(batch_size):
             if self.logloss:
-                loss[batch_idx] = log_kernel_loss(
+                rkhs_mse[batch_idx] = log_kernel_loss(
                     pos_split[batch_idx],
                     weights_split[batch_idx].relu().log(),
                     y_split[batch_idx],
                     self.kernel_sigma,
                 )
             else:
-                loss[batch_idx] = kernel_loss(
+                rkhs_mse[batch_idx] = kernel_loss(
                     pos_split[batch_idx],
                     weights_split[batch_idx],
                     y_split[batch_idx],
                     self.kernel_sigma,
                 )
-        return loss.mean()
+
+        cardinality_mse = torch.nn.functional.mse_loss(
+            self.estimate_cardinality(output),
+            label.batch.float(),
+        )
+        return rkhs_mse.mean(), cardinality_mse
+
+    def estimate_cardinality(self, output: Mixture):
+        if output.batch is None:
+            return output.weights.relu().sum()
+        else:
+            split_idx = output.batch.cpu().cumsum(0)[:-1]
+            weights_split = output.weights.tensor_split(split_idx)
+            return torch.stack([w.relu().sum() for w in weights_split])
 
     def ospa(self, label: SparseLabel, output: Mixture):
         assert output.batch is not None
@@ -455,7 +478,6 @@ class RKHSBase(pl.LightningModule):
         return ospa.mean()
 
     def find_peaks(self, output: Mixture):
-        n_components = output.weights.sum().item()
         kernel = GaussianKernel(self.kernel_sigma * 2)
         pos = output.positions.detach()
         weights = output.weights.detach().squeeze()
@@ -473,6 +495,7 @@ class RKHSBase(pl.LightningModule):
         X = avg_pool_x(
             cluster, X, torch.full(X.shape[:1], 1, device=X.device, dtype=torch.long)
         )[0]
+        n_components = self.estimate_cardinality(output).item()
         likelyhood = kernel(X, pos) @ weights
         mu = X.cpu().numpy()
         gmm = reweigh(GMM(mu, mu, likelyhood.cpu().numpy()), n_components)
@@ -534,6 +557,7 @@ class KNN(RKHSBase):
                     self.sigma[l],
                     update_positions,
                     sample_ratio,
+                    alpha=alpha,
                 )
                 for l in range(n_layers)
             ]
@@ -543,8 +567,7 @@ class KNN(RKHSBase):
         x = x.map_weights(self.readin.forward)
         x = self.convolutions(x)
         x = x.map_weights(self.readout.forward)
-        # relu activation on weights
-        x = x.map_weights(nn.functional.relu)
+        x = x.map_weights(self.nonlinearity)
         return x
 
     def configure_optimizers(self):

@@ -12,8 +12,9 @@ from tqdm import tqdm
 
 from mtt.data.image import stack_images, to_image
 from mtt.data.sim import SimulationStep
-from mtt.data.sparse import SparseDataset
+from mtt.data.sparse import SparseData, SparseDataset
 from mtt.models.convolutional import Conv2dCoder
+from mtt.models.kernel import RKHSBase
 from mtt.models.sparse import SparseBase, SparseLabel
 from mtt.models.utils import load_model
 from mtt.peaks import find_peaks
@@ -66,7 +67,7 @@ def main():
         test_fn = test_runtime if args.runtime else test_model
         result = test_fn(
             model,
-            os.path.join(args.data_dir, f"{scale}km", "simulations.pkl"),
+            os.path.join(args.data_dir, f"{scale}km"),
             scale=scale,
         )
         # data in data_dir is organized by scale in folders: 1km, 2km, 3km etc.
@@ -130,26 +131,32 @@ def test_cnn_runtime(model: Conv2dCoder, data_path: str, scale=1):
 def test_model(model, data_path: str, scale: int = 1):
     if isinstance(model, Conv2dCoder):
         return test_conv_model(model, data_path, scale=scale)
-    else:
-        raise ValueError(f"Model type {type(model)} not supported.")
+    elif isinstance(model, RKHSBase):
+        return test_knn_model(model, data_path, scale=scale)
 
 
 @torch.no_grad()
-def test_knn_model(model: SparseBase, data_path: str, scale=1):
+def test_knn_model(model: RKHSBase, data_path: str, scale=1):
     model = model.cuda()
-    dataset = SparseDataset(data_path, length=model.length)
+    # update n_samples
+    model.n_samples *= scale**2
+
+    dataset = SparseDataset(data_path, length=model.input_length)
     result: List[Dict] = []
-    for idx in tqdm(range(len(dataset))):
+    indices = np.random.permutation(len(dataset))[:10]
+    for idx in tqdm(indices):
         sim_idx, step_idx = dataset.parse_index(idx)
         data = dataset[idx]
-
+        data = SparseData(*(t.cuda() for t in data))
         label = SparseLabel.from_sparse_data(data, model.input_length)
-        output = model.forward(data)
+        label = SparseLabel(*(t.cuda() for t in label))
+        output = model.forward(model.forward_input(data))
         # batch size should be one
         assert output.batch.shape[0] == 1
         ospa = model.ospa(label, output).item()
         # "kernel" loss means the energy of the difference between the RKHS functions ||f - g||^2
-        mse = model.loss(label, output, "kernel").item()
+        # divide by scale**2 to get the per unit area loss
+        mse = model.loss(label, output).item() / scale**2
         # TODO: add cardinality to result dict
         result.append(
             dict(
