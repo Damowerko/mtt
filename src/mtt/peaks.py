@@ -160,7 +160,7 @@ def reweigh(gmm: GMM, n_components):
     For example, if a component has a weight of 2.6, it will be split into 2 components of weight 2 and one component of weight 0.6.
     3. Remove components with a weight smaller than 0.5.
     """
-    weights = gmm.weights * n_components / gmm.weights.sum()
+    weights = gmm.weights * n_components / (gmm.weights.sum() + 1e-8)
 
     _idx = []
     _weights = []
