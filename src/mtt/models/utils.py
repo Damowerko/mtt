@@ -5,10 +5,11 @@ from typing import Tuple
 import yaml
 
 from mtt.models.convolutional import EncoderDecoder
+from mtt.models.kernel import RKHSBase
 from mtt.models.sparse import SparseBase
 
 
-def load_model(uri: str) -> Tuple[SparseBase | EncoderDecoder, str, dict]:
+def load_model(uri: str) -> Tuple[RKHSBase | SparseBase | EncoderDecoder, str, dict]:
     """Load a model from a uri.
 
     Args:
