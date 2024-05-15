@@ -296,7 +296,7 @@ class RKHSBase(pl.LightningModule):
         self,
         lr: float = 1e-3,
         weight_decay: float = 1e-4,
-        ospa_cutoff: float = 10.0,
+        ospa_cutoff: float = 500.0,
         input_length: int = 10,
         logloss: bool = False,
         kernel_sigma: float = 10.0,
