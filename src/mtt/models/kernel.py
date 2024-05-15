@@ -105,6 +105,7 @@ class KernelEncoderLayer(nn.Module):
         sigma: float,
         update_positions: bool,
         select_ratio: float = 1.0,
+        alpha: float = 0,
     ):
         super().__init__()
         pos_dim = 2
@@ -118,7 +119,9 @@ class KernelEncoderLayer(nn.Module):
             kernel_init="grid",
         )
         self.sample = KernelSample(
-            kernel=GaussianKernel(sigma), nonlinearity=nn.LeakyReLU()
+            kernel=GaussianKernel(sigma),
+            nonlinearity=nn.LeakyReLU(),
+            alpha=alpha if alpha > 0 else None,
         )
         self.conv_norm = nn.BatchNorm1d(n_channels)
         self.mlp = gnn.MLP(
@@ -170,6 +173,38 @@ class KernelEncoderLayer(nn.Module):
         return x_out
 
 
+# def kernel_loss(x: torch.Tensor, w: torch.Tensor, y: torch.Tensor, kernel: Kernel):
+#     """
+#     Assumes that x and y are centers of gaussian pulses with variance sigma^2. Computes the MSE loss between the two.
+#     ||x-y||^2 = ||x||^2 + ||y||^2 - 2<x,y>
+#     ArgsL
+#         x: (N, d) Predicted positions.
+#         w: (N, d) Weights.
+#         y: (M, d) Ground truth positions.
+#     """
+#     if x.shape[0] == 0:
+#         xx = 0
+#     else:
+#         K_xx = kernel(x, x)
+#         xx = (w.mT @ (K_xx @ w)).squeeze(-1)
+
+#     if y.shape[0] == 0:
+#         yy = 0
+#     else:
+#         K_yy = kernel(y, y)
+#         # assuming that the ground truth is always 1
+#         yy = (K_yy @ torch.ones(K_yy.shape[0], device=y.device)).sum()
+
+#     if x.shape[0] == 0 or y.shape[0] == 0:
+#         xy = 0
+#     else:
+#         K_yx = kernel(y, x)
+#         xy = (K_yx @ w).sum()
+
+#     loss = xx + yy - 2 * xy
+#     return loss
+
+
 def kernel_loss(x: torch.Tensor, w: torch.Tensor, y: torch.Tensor, sigma: float):
     """
     Assumes that x and y are centers of gaussian pulses with variance sigma^2. Computes the MSE loss between the two.
@@ -185,7 +220,7 @@ def kernel_loss(x: torch.Tensor, w: torch.Tensor, y: torch.Tensor, sigma: float)
     K_xx = torch.exp(-(x_dist**2) / (2 * sigma**2)) / (
         (2 * math.pi * sigma**2) ** (pos_dims / 2)
     )
-    xx = (w.unsqueeze(-2) @ K_xx @ w.unsqueeze(-1)).squeeze(-1)
+    xx = (w.mT @ K_xx @ w).squeeze(-1)
 
     y_dist = torch.cdist(y, y, p=2)
     K_yy = torch.exp(-(y_dist**2) / (2 * sigma**2)) / (
@@ -198,7 +233,7 @@ def kernel_loss(x: torch.Tensor, w: torch.Tensor, y: torch.Tensor, sigma: float)
     K_xy = torch.exp(-(cross_dist**2) / (2 * sigma**2)) / (
         (2 * math.pi * sigma**2) ** (pos_dims / 2)
     )
-    xy = (w.unsqueeze(-2) @ K_xy).sum()
+    xy = (w.mT @ K_xy).sum()
 
     loss = xx + yy - 2 * xy
     return loss.squeeze()
@@ -252,73 +287,34 @@ def log_kernel_loss(x: torch.Tensor, logw: torch.Tensor, y: torch.Tensor, sigma:
     return loss
 
 
-class KNN(pl.LightningModule):
+class RKHSBase(pl.LightningModule):
     @classmethod
     def add_model_specific_args(cls, group):
         return add_model_specific_args(cls, group)
 
     def __init__(
         self,
-        n_layers: int = 2,
-        n_samples: int = 1000,
-        n_hidden: int = 32,
-        n_hidden_mlp: int = 128,
-        sigma: list[float] = [10.0],
-        max_filter_kernels: int = 25,
-        update_positions: bool = False,
-        sample_ratio: float = 1.0,
         lr: float = 1e-3,
         weight_decay: float = 1e-4,
         ospa_cutoff: float = 10.0,
         input_length: int = 10,
         logloss: bool = False,
         kernel_sigma: float = 10.0,
+        n_samples: int = 1000,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        super().__init__()
         self.save_hyperparameters()
-        self.n_layers = n_layers
-        if isinstance(sigma, float):
-            self.sigma = [sigma] * n_layers
-        else:
-            self.sigma = sigma * n_layers if len(sigma) == 1 else sigma
-        self.n_samples = n_samples
-        self.nonlinearity = nn.LeakyReLU()
         self.learning_rate = lr
         self.weight_decay = weight_decay
         self.ospa_cutoff = ospa_cutoff
         self.input_length = input_length
         self.logloss = logloss
         self.kernel_sigma = kernel_sigma
+        self.n_samples = n_samples
 
-        in_channels = self.input_length
-        out_channels = 2  # sigma, logp
-
-        self.readin = gnn.MLP(
-            [in_channels, n_hidden_mlp, n_hidden],
-            act=self.nonlinearity,
-            norm="batch_norm",
-            plain_last=False,
-        )
-        self.readout = gnn.MLP(
-            [n_hidden, n_hidden_mlp, out_channels],
-            act=self.nonlinearity,
-            norm="batch_norm",
-            plain_last=True,
-        )
-        self.convolutions = nn.Sequential(
-            *[
-                KernelEncoderLayer(
-                    max_filter_kernels,
-                    n_hidden,
-                    n_hidden_mlp,
-                    self.sigma[l],
-                    update_positions,
-                    sample_ratio,
-                )
-                for l in range(n_layers)
-            ]
-        )
+    def forward(self, batch: Mixture) -> Mixture:
+        raise NotImplementedError("Implement forward method.")
 
     @torch.no_grad()
     def forward_input(self, data: SparseData) -> Mixture:
@@ -382,14 +378,6 @@ class KNN(pl.LightningModule):
             ),
         )
         return mixture
-
-    def forward(self, x: Mixture) -> Mixture:
-        x = x.map_weights(self.readin.forward)
-        x = self.convolutions(x)
-        x = x.map_weights(self.readout.forward)
-        # relu activation on weights
-        x = x.map_weights(nn.functional.relu)
-        return x
 
     def training_step(self, batch, *_):
         output = self.forward(self.forward_input(batch))
@@ -467,10 +455,10 @@ class KNN(pl.LightningModule):
         return ospa.mean()
 
     def find_peaks(self, output: Mixture):
-        n_components = output.weights.sum(-1).item()
+        n_components = output.weights.sum().item()
         kernel = GaussianKernel(self.kernel_sigma * 2)
         pos = output.positions.detach()
-        weights = output.weights.detach()
+        weights = output.weights.detach().squeeze()
         X = pos.clone().requires_grad_(True)
         optimizer = torch.optim.AdamW([X], lr=10, weight_decay=0.0)
         with torch.enable_grad():
@@ -489,6 +477,75 @@ class KNN(pl.LightningModule):
         mu = X.cpu().numpy()
         gmm = reweigh(GMM(mu, mu, likelyhood.cpu().numpy()), n_components)
         return gmm.means
+
+    def configure_optimizers(self):
+        return torch.optim.AdamW(
+            self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay
+        )
+
+
+class KNN(RKHSBase):
+    @classmethod
+    def add_model_specific_args(cls, group):
+        return add_model_specific_args(cls, group)
+
+    def __init__(
+        self,
+        n_layers: int = 2,
+        n_hidden: int = 32,
+        n_hidden_mlp: int = 128,
+        sigma: list[float] = [10.0],
+        max_filter_kernels: int = 25,
+        update_positions: bool = False,
+        sample_ratio: float = 1.0,
+        alpha: float = 0,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.save_hyperparameters()
+        if isinstance(sigma, float):
+            self.sigma = [sigma] * n_layers
+        else:
+            self.sigma = sigma * n_layers if len(sigma) == 1 else sigma
+        self.n_layers = n_layers
+        self.nonlinearity = nn.LeakyReLU()
+
+        in_channels = self.input_length
+        out_channels = 1  # weights
+
+        self.readin = gnn.MLP(
+            [in_channels, n_hidden_mlp, n_hidden],
+            act=self.nonlinearity,
+            norm="batch_norm",
+            plain_last=False,
+        )
+        self.readout = gnn.MLP(
+            [n_hidden, n_hidden_mlp, out_channels],
+            act=self.nonlinearity,
+            norm="batch_norm",
+            plain_last=True,
+        )
+        self.convolutions = nn.Sequential(
+            *[
+                KernelEncoderLayer(
+                    max_filter_kernels,
+                    n_hidden,
+                    n_hidden_mlp,
+                    self.sigma[l],
+                    update_positions,
+                    sample_ratio,
+                )
+                for l in range(n_layers)
+            ]
+        )
+
+    def forward(self, x: Mixture) -> Mixture:
+        x = x.map_weights(self.readin.forward)
+        x = self.convolutions(x)
+        x = x.map_weights(self.readout.forward)
+        # relu activation on weights
+        x = x.map_weights(nn.functional.relu)
+        return x
 
     def configure_optimizers(self):
         # get all parameters that are KernelConv.kernel_positions
