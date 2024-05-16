@@ -97,6 +97,19 @@ class Upsample(nn.Module):
         return sample_kernel(self.kernel, x, positions, batch_new)
 
 
+class SamplingNormalization(nn.Module):
+    def __init__(self, kernel: Kernel):
+        super().__init__()
+        self.kernel = kernel
+
+    def forward(self, x: Mixture):
+        K = self.kernel(x.positions, x.positions, x.batch, x.batch)
+        return Mixture(
+            x.positions,
+            x.weights / K.sum(-1),
+        )
+
+
 class KernelEncoderLayer(nn.Module):
     def __init__(
         self,
@@ -108,6 +121,7 @@ class KernelEncoderLayer(nn.Module):
         select_ratio: float = 1.0,
         alpha: float = 0,
         deformable: bool = False,
+        sampling_normalization: bool = False,
     ):
         super().__init__()
         pos_dim = 2
@@ -143,11 +157,16 @@ class KernelEncoderLayer(nn.Module):
             SelectTopK(n_channels, select_ratio) if select_ratio < 0.99 else None
         )
         self.deformable = deformable
+        self.sampling_normalization = (
+            SamplingNormalization(self.kernel) if sampling_normalization else None
+        )
 
     def forward(self, x_in: Mixture):
         x = self.conv.forward(x_in)
         # KernelSample applies the nonlinearity after sampling
         x = self.sample.forward(x, x_in.positions, x_in.batch)
+        if self.sampling_normalization:
+            x = self.sampling_normalization(x)
         x = x.map_weights(self.conv_norm)
         # residual connection
         x = x.map_weights(x_in.weights.add)
@@ -314,7 +333,6 @@ class RKHSBase(pl.LightningModule):
         weight_decay: float = 1e-4,
         ospa_cutoff: float = 500.0,
         input_length: int = 10,
-        logloss: bool = False,
         kernel_sigma: float = 10.0,
         n_samples: int = 1000,
         cardinality_weight: float = 0.0,
@@ -326,13 +344,9 @@ class RKHSBase(pl.LightningModule):
         self.weight_decay = weight_decay
         self.ospa_cutoff = ospa_cutoff
         self.input_length = input_length
-        self.logloss = logloss
         self.kernel_sigma = kernel_sigma
         self.n_samples = n_samples
         self.cardinality_weight = cardinality_weight
-        self.cardinality_scale = nn.Parameter(
-            torch.ones(1, requires_grad=True, device=self.device)
-        )
 
     def forward(self, batch: Mixture) -> Mixture:
         raise NotImplementedError("Implement forward method.")
@@ -449,36 +463,27 @@ class RKHSBase(pl.LightningModule):
         batch_size = output.batch.shape[0]
         rkhs_mse = torch.zeros((batch_size,), device=self.device)
         for batch_idx in range(batch_size):
-            if self.logloss:
-                rkhs_mse[batch_idx] = log_kernel_loss(
-                    pos_split[batch_idx],
-                    weights_split[batch_idx].relu().log(),
-                    y_split[batch_idx],
-                    self.kernel_sigma,
-                )
-            else:
-                rkhs_mse[batch_idx] = kernel_loss(
-                    pos_split[batch_idx],
-                    weights_split[batch_idx],
-                    y_split[batch_idx],
-                    self.kernel_sigma,
-                )
+            rkhs_mse[batch_idx] = kernel_loss(
+                pos_split[batch_idx],
+                weights_split[batch_idx][..., :1],
+                y_split[batch_idx],
+                self.kernel_sigma,
+            )
 
         cardinality_mse = torch.nn.functional.mse_loss(
-            self.estimate_cardinality(output),
+            self.estimate_cardinality(output).squeeze(-1),
             label.batch.float(),
         )
         return rkhs_mse.mean(), cardinality_mse
 
     def estimate_cardinality(self, output: Mixture):
+        weights = output.weights[..., -1]
         if output.batch is None:
-            return output.weights.sum() * self.cardinality_scale
+            return weights.sum()
         else:
             split_idx = output.batch.cpu().cumsum(0)[:-1]
-            weights_split = output.weights.tensor_split(split_idx)
-            return torch.stack(
-                [w.sum() * self.cardinality_scale for w in weights_split]
-            )
+            weights_split = weights.tensor_split(split_idx)
+            return torch.stack([w.sum() for w in weights_split])
 
     def ospa(self, label: SparseLabel, output: Mixture):
         assert output.batch is not None
@@ -499,7 +504,7 @@ class RKHSBase(pl.LightningModule):
     def find_peaks(self, output: Mixture):
         kernel = GaussianKernel(self.kernel_sigma * 2)
         pos = output.positions.detach()
-        weights = output.weights.detach().squeeze()
+        weights = output.weights.detach()[..., :1].squeeze().contiguous()
         X = pos.clone().requires_grad_(True)
         optimizer = torch.optim.AdamW([X], lr=10, weight_decay=0.0)
         with torch.enable_grad():
@@ -554,7 +559,7 @@ class KNN(RKHSBase):
         self.nonlinearity = nn.LeakyReLU()
 
         in_channels = self.input_length
-        out_channels = 1  # weights
+        out_channels = 2  # weights
 
         self.readin = gnn.MLP(
             [in_channels, n_hidden_mlp, n_hidden],
