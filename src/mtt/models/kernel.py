@@ -1,6 +1,7 @@
 import math
 from typing import NamedTuple
 
+import pykeops.torch as keops
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -106,6 +107,7 @@ class KernelEncoderLayer(nn.Module):
         update_positions: bool,
         select_ratio: float = 1.0,
         alpha: float = 0,
+        deformable: bool = False,
     ):
         super().__init__()
         pos_dim = 2
@@ -118,14 +120,19 @@ class KernelEncoderLayer(nn.Module):
             update_positions=update_positions,
             kernel_init="grid",
         )
+        self.kernel = GaussianKernel(sigma)
         self.sample = KernelSample(
-            kernel=GaussianKernel(sigma),
+            kernel=self.kernel,
             nonlinearity=nn.LeakyReLU(),
             alpha=alpha if alpha > 0 else None,
         )
         self.conv_norm = nn.BatchNorm1d(n_channels)
         self.mlp = gnn.MLP(
-            [n_channels, n_channels_mlp, n_channels + pos_dim],
+            [
+                n_channels,
+                n_channels_mlp,
+                n_channels + pos_dim if deformable else n_channels,
+            ],
             act=nn.LeakyReLU(),
             norm="batch_norm",
             act_first=True,
@@ -135,6 +142,7 @@ class KernelEncoderLayer(nn.Module):
         self.select = (
             SelectTopK(n_channels, select_ratio) if select_ratio < 0.99 else None
         )
+        self.deformable = deformable
 
     def forward(self, x_in: Mixture):
         x = self.conv.forward(x_in)
@@ -144,15 +152,21 @@ class KernelEncoderLayer(nn.Module):
         # residual connection
         x = x.map_weights(x_in.weights.add)
         mlp_out = self.mlp.forward(x.weights)
-        delta_positions, delta_weights = torch.split(
-            mlp_out, [x.positions.shape[-1], x.weights.shape[-1]], dim=-1
-        )
+        delta_weights = mlp_out[..., : x.weights.shape[-1]]
         # residual connection
         x_out = Mixture(
-            x.positions + delta_positions,
+            x.positions,
             x.weights + delta_weights,
             x.batch,
         )
+        if self.deformable:
+            # we perturb the positions by the output of the mlp
+            delta_positions = mlp_out[..., x.weights.shape[-1] :]
+            x_out = Mixture(
+                x_out.positions + delta_positions,
+                x_out.weights,
+                x_out.batch,
+            )
         if self.select is not None:
             # see: https://pytorch-geometric.readthedocs.io/en/latest/generated/torch_geometric.nn.pool.TopKPooling.html
             # we have to multiply the output by the score to make this differentiable
@@ -316,6 +330,9 @@ class RKHSBase(pl.LightningModule):
         self.kernel_sigma = kernel_sigma
         self.n_samples = n_samples
         self.cardinality_weight = cardinality_weight
+        self.cardinality_scale = nn.Parameter(
+            torch.ones(1, requires_grad=True, device=self.device)
+        )
 
     def forward(self, batch: Mixture) -> Mixture:
         raise NotImplementedError("Implement forward method.")
@@ -372,7 +389,7 @@ class RKHSBase(pl.LightningModule):
         # weights.shape = (batch_size, n_samples, input_length)
         kernel = GaussianKernel(self.sigma[0])
         mixture = Mixture(positions, weights)
-        mixture = solve_kernel(kernel, mixture, alpha=0.001)
+        mixture = solve_kernel(kernel, mixture, alpha=0.1)
         # combine the batch dimension with the sample dimension
         mixture = Mixture(
             positions=mixture.positions.view(-1, 2),
@@ -455,11 +472,13 @@ class RKHSBase(pl.LightningModule):
 
     def estimate_cardinality(self, output: Mixture):
         if output.batch is None:
-            return output.weights.relu().sum()
+            return output.weights.sum() * self.cardinality_scale
         else:
             split_idx = output.batch.cpu().cumsum(0)[:-1]
             weights_split = output.weights.tensor_split(split_idx)
-            return torch.stack([w.relu().sum() for w in weights_split])
+            return torch.stack(
+                [w.sum() * self.cardinality_scale for w in weights_split]
+            )
 
     def ospa(self, label: SparseLabel, output: Mixture):
         assert output.batch is not None
@@ -522,6 +541,7 @@ class KNN(RKHSBase):
         update_positions: bool = False,
         sample_ratio: float = 1.0,
         alpha: float = 0,
+        deformable: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -558,6 +578,7 @@ class KNN(RKHSBase):
                     update_positions,
                     sample_ratio,
                     alpha=alpha,
+                    deformable=deformable,
                 )
                 for l in range(n_layers)
             ]
@@ -601,6 +622,7 @@ class KNN(RKHSBase):
         )
 
 
+@torch.no_grad()
 def sample_measurement_intensity(
     XY: torch.Tensor,
     measurements: torch.Tensor,
@@ -625,6 +647,7 @@ def sample_measurement_intensity(
     delta_r = torch.abs(rtheta_sample[..., 0] - rtheta_measurement[..., 0])
     delta_theta = rtheta_sample[..., 1] - rtheta_measurement[..., 1]
     delta_theta = (delta_theta + torch.pi) % (2 * torch.pi) - torch.pi
+
     Z = (
         torch.exp(
             -0.5 * (delta_r**2 / noise_range**2 + delta_theta**2 / noise_bearing**2)
