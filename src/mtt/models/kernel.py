@@ -471,7 +471,7 @@ class RKHSBase(pl.LightningModule):
             )
 
         cardinality_mse = torch.nn.functional.mse_loss(
-            self.estimate_cardinality(output).squeeze(-1),
+            self.estimate_cardinality(output).view(batch_size),
             label.batch.float(),
         )
         return rkhs_mse.mean(), cardinality_mse
