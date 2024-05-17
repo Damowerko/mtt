@@ -221,7 +221,7 @@ def kernel_loss_keops(
         xx = 0
     else:
         K_xx = kernel(x, x)
-        xx = (w.mT @ (K_xx @ w)).squeeze(-1)
+        xx = (w.mT @ (K_xx @ w)).squeeze()
 
     if y.shape[0] == 0:
         yy = 0
@@ -255,7 +255,7 @@ def kernel_loss(x: torch.Tensor, w: torch.Tensor, y: torch.Tensor, sigma: float)
     K_xx = torch.exp(-(x_dist**2) / (2 * sigma**2)) / (
         (2 * math.pi * sigma**2) ** (pos_dims / 2)
     )
-    xx = (w.mT @ K_xx @ w).squeeze(-1)
+    xx = (w.mT @ K_xx @ w).squeeze()
 
     y_dist = torch.cdist(y, y, p=2)
     K_yy = torch.exp(-(y_dist**2) / (2 * sigma**2)) / (
@@ -271,7 +271,7 @@ def kernel_loss(x: torch.Tensor, w: torch.Tensor, y: torch.Tensor, sigma: float)
     xy = (w.mT @ K_xy).sum()
 
     loss = xx + yy - 2 * xy
-    return loss.squeeze()
+    return loss
 
 
 def scaled_logsumexp(x: torch.Tensor, dims: int | tuple[int, ...] = -1):
