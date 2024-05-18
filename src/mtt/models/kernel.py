@@ -121,10 +121,13 @@ class KernelEncoderLayer(nn.Module):
         select_ratio: float = 1.0,
         alpha: float = 0,
         deformable: bool = False,
+        deform_tanh: bool = False,
         sampling_normalization: bool = False,
     ):
         super().__init__()
         pos_dim = 2
+        self.deformable = deformable
+        self.deform_tanh = deform_tanh
         self.conv = KernelConv(
             max_filter_kernels,
             n_channels,
@@ -156,7 +159,6 @@ class KernelEncoderLayer(nn.Module):
         self.select = (
             SelectTopK(n_channels, select_ratio) if select_ratio < 0.99 else None
         )
-        self.deformable = deformable
         self.sampling_normalization = (
             SamplingNormalization(self.kernel) if sampling_normalization else None
         )
@@ -180,7 +182,9 @@ class KernelEncoderLayer(nn.Module):
         )
         if self.deformable:
             # we perturb the positions by the output of the mlp
-            delta_positions = mlp_out[..., x.weights.shape[-1] :]
+            delta_positions = delta_positions = mlp_out[..., x.weights.shape[-1] :]
+            if self.deform_tanh:
+                delta_positions = delta_positions.tanh() * self.kernel.sigma * 3
             x_out = Mixture(
                 x_out.positions + delta_positions,
                 x_out.weights,
@@ -547,6 +551,7 @@ class KNN(RKHSBase):
         sample_ratio: float = 1.0,
         alpha: float = 0,
         deformable: bool = False,
+        deform_tanh: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -584,6 +589,7 @@ class KNN(RKHSBase):
                     sample_ratio,
                     alpha=alpha,
                     deformable=deformable,
+                    deform_tanh=deform_tanh,
                 )
                 for l in range(n_layers)
             ]
