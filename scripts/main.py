@@ -20,7 +20,7 @@ from wandb.wandb_run import Run
 from mtt.data.image import OnlineImageDataset, build_image_dp, collate_image_fn
 from mtt.data.sparse import SparseDataset
 from mtt.models.convolutional import EncoderDecoder
-from mtt.models.kernel import KNN
+from mtt.models.kernel import GNN, KNN, RKHSBase
 from mtt.models.sparse import SparseBase
 from mtt.models.utils import get_model_class
 from mtt.simulator import Simulator
@@ -29,7 +29,9 @@ from mtt.simulator import Simulator
 def main():
     parser = argparse.ArgumentParser(conflict_handler="resolve")
     parser.add_argument("operation", type=str, choices=["train", "test", "study"])
-    parser.add_argument("model", type=str, choices=["conv2d", "st", "knn", "egnn"])
+    parser.add_argument(
+        "model", type=str, choices=["conv2d", "st", "knn", "torchknn", "egnn", "gnn"]
+    )
 
     # program arguments
     group = parser.add_argument_group("General")
@@ -100,7 +102,7 @@ def train(trainer: pl.Trainer, params: argparse.Namespace):
         # load model
         model = model_cls(**vars(params))
 
-    elif issubclass(model_cls, (SparseBase, KNN)):
+    elif issubclass(model_cls, (SparseBase, RKHSBase)):
         # Prepare Sparse Dataset
         dataset = SparseDataset(params.data_dir, params.input_length, params.slim)
         train_dataset, val_dataset = random_split(

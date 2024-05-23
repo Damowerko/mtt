@@ -1,7 +1,6 @@
 import math
-from typing import NamedTuple
+import typing
 
-import pykeops.torch as keops
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
@@ -9,6 +8,7 @@ import torch_geometric.nn as gnn
 from torch_cluster import grid_cluster
 from torch_geometric.nn.pool import avg_pool_x
 from torch_geometric.nn.pool.select import SelectOutput, SelectTopK
+from torch_scatter import scatter
 from torchcps.kernel.nn import (
     GaussianKernel,
     Kernel,
@@ -18,6 +18,7 @@ from torchcps.kernel.nn import (
     sample_kernel,
     solve_kernel,
 )
+from torchcps.kernel.rkhs import GaussianKernel
 
 from mtt.data.sparse import SparseData
 from mtt.models.sparse import SparseLabel
@@ -120,13 +121,12 @@ class KernelEncoderLayer(nn.Module):
         update_positions: bool,
         select_ratio: float = 1.0,
         alpha: float = 0,
-        deformable: bool = False,
+        deform: bool = False,
         deform_tanh: bool = False,
-        sampling_normalization: bool = False,
     ):
         super().__init__()
         pos_dim = 2
-        self.deformable = deformable
+        self.deform = deform
         self.deform_tanh = deform_tanh
         self.conv = KernelConv(
             max_filter_kernels,
@@ -148,7 +148,7 @@ class KernelEncoderLayer(nn.Module):
             [
                 n_channels,
                 n_channels_mlp,
-                n_channels + pos_dim if deformable else n_channels,
+                n_channels + pos_dim if deform else n_channels,
             ],
             act=nn.LeakyReLU(),
             norm="batch_norm",
@@ -159,16 +159,11 @@ class KernelEncoderLayer(nn.Module):
         self.select = (
             SelectTopK(n_channels, select_ratio) if select_ratio < 0.99 else None
         )
-        self.sampling_normalization = (
-            SamplingNormalization(self.kernel) if sampling_normalization else None
-        )
 
-    def forward(self, x_in: Mixture):
+    def forward(self, x_in: Mixture, cluster=False):
         x = self.conv.forward(x_in)
         # KernelSample applies the nonlinearity after sampling
-        x = self.sample.forward(x, x_in.positions, x_in.batch)
-        if self.sampling_normalization:
-            x = self.sampling_normalization(x)
+        x = self.sample.forward(x, x_in.positions, x_in.batch, cluster=cluster)
         x = x.map_weights(self.conv_norm)
         # residual connection
         x = x.map_weights(x_in.weights.add)
@@ -180,7 +175,7 @@ class KernelEncoderLayer(nn.Module):
             x.weights + delta_weights,
             x.batch,
         )
-        if self.deformable:
+        if self.deform:
             # we perturb the positions by the output of the mlp
             delta_positions = delta_positions = mlp_out[..., x.weights.shape[-1] :]
             if self.deform_tanh:
@@ -340,6 +335,7 @@ class RKHSBase(pl.LightningModule):
         kernel_sigma: float = 10.0,
         n_samples: int = 1000,
         cardinality_weight: float = 0.0,
+        solve_input: bool = True,
         **kwargs,
     ):
         super().__init__()
@@ -351,6 +347,7 @@ class RKHSBase(pl.LightningModule):
         self.kernel_sigma = kernel_sigma
         self.n_samples = n_samples
         self.cardinality_weight = cardinality_weight
+        self.solve_input = solve_input
 
     def forward(self, batch: Mixture) -> Mixture:
         raise NotImplementedError("Implement forward method.")
@@ -405,9 +402,10 @@ class RKHSBase(pl.LightningModule):
 
         # positions.shape = (batch_size, n_samples, 2)
         # weights.shape = (batch_size, n_samples, input_length)
-        kernel = GaussianKernel(self.sigma[0])
         mixture = Mixture(positions, weights)
-        mixture = solve_kernel(kernel, mixture, alpha=0.1)
+        if self.solve_input:
+            kernel = GaussianKernel(self.sigma[0])
+            mixture = solve_kernel(kernel, mixture, alpha=0.1)
         # combine the batch dimension with the sample dimension
         mixture = Mixture(
             positions=mixture.positions.view(-1, 2),
@@ -535,6 +533,261 @@ class RKHSBase(pl.LightningModule):
         )
 
 
+class TorchKernelConv(gnn.MessagePassing):
+    @staticmethod
+    def _grid_positions(
+        max_filter_kernels: int,
+        n_dimensions: int,
+        kernel_spread: float = 1.0,
+    ):
+        """
+        Arrange the kernels in a n-dimensional hypergrid.
+
+        The number of kernels per dimension is determined by `(max_filter_kernels)**(1/n_dimensions)`.
+
+        Args:
+            max_filter_kernels: maximum number of kernels per filter
+            n_dimensions: number of dimensions
+            kernel_spread: distance between kernels
+        """
+        n_kernels_per_dimension = int(max_filter_kernels ** (1 / n_dimensions))
+        # make sure the kernel width is odd
+        if n_kernels_per_dimension % 2 == 0:
+            n_kernels_per_dimension -= 1
+        # spread the kernels out in a grid
+        kernel_positions = kernel_spread * torch.linspace(
+            n_kernels_per_dimension / 2,
+            -n_kernels_per_dimension / 2,
+            n_kernels_per_dimension,
+        )
+        # (n_kernels_per_dimension ** n_dimensions, n_dimensions)
+        kernel_positions = torch.stack(
+            torch.meshgrid(*([kernel_positions] * n_dimensions)), dim=-1
+        ).reshape(-1, n_dimensions)
+        return kernel_positions
+
+    @staticmethod
+    def _uniform_positions(
+        max_filter_kernels: int,
+        n_dimensions: int,
+        kernel_spread: float = 1.0,
+    ):
+        """
+        Arrange the kernels uniformly randomly.
+        The number of kernels is always `max_filter_kernels`.
+
+        Args:
+            max_filter_kernels: maximum number of kernels per filter
+            n_dimensions: number of dimensions
+            kernel_spread: distance between kernels
+        """
+        n_kernels_per_dimension = max_filter_kernels ** (1 / n_dimensions)
+        x = torch.rand((max_filter_kernels, n_dimensions))
+        kernel_positions = n_kernels_per_dimension * kernel_spread * (x - 0.5)
+        return kernel_positions
+
+    def __init__(
+        self,
+        max_filter_kernels: int,
+        in_channels: int,
+        out_channels: int,
+        n_dimensions: int,
+        sigma: float = 10.0,
+        update_positions: bool = True,
+        kernel_init: str = "uniform",
+    ):
+        super().__init__(aggr="add")
+
+        # initialize kernel positions
+        kernel_init_fn = {
+            "grid": self._grid_positions,
+            "uniform": self._uniform_positions,
+        }[kernel_init]
+
+        self.sigma = sigma
+
+        # (filter_kernels, n_dimensions)
+        self.kernel_positions = nn.Parameter(
+            kernel_init_fn(
+                max_filter_kernels,
+                n_dimensions,
+                sigma,
+            ),
+            requires_grad=update_positions,
+        )
+
+        # the actual number of filter kernels might be smaller than the maximum
+        filter_kernels = self.kernel_positions.shape[0]
+
+        # (filter_kernels, in_channels, out_channels)
+        self.kernel_weights = nn.Parameter(
+            torch.empty(filter_kernels, in_channels, out_channels)
+        )
+        nn.init.kaiming_normal_(self.kernel_weights)
+
+    def forward(self, x: Mixture, edge_index: torch.Tensor):
+        """
+        Args:
+            x: (positions, weights, batch)
+            edge_index: (2, n_edges) The edge index.
+        """
+        return self.propagate(edge_index, x=x.positions, w=x.weights)
+
+    def message(
+        self, x_i: torch.Tensor, x_j: torch.Tensor, w_i: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Kernel convolution function.
+        Args:
+            x_i: (n_edges, n_dimensions) The positions of the source nodes.
+            x_j: (n_edges, n_dimensions) The positions of the target nodes.
+            w_i: (n_edges, in_channels) The weights of the source nodes.
+        """
+        w_j = torch.zeros_like(w_i)
+        for k in range(self.kernel_positions.shape[0]):
+            out_weight = w_i @ self.kernel_weights[k]
+            out_kernel = torch.exp(
+                -0.5
+                * ((x_j - x_i - self.kernel_positions[k]) / self.sigma).pow(2).sum(-1)
+            )
+            # the dimension of out_kernel is (n_edges,) need to unsqueeze it
+            w_j += out_weight * out_kernel[:, None]
+        return w_j
+
+
+class TorchKNN(RKHSBase):
+    @classmethod
+    def add_model_specific_args(cls, group):
+        return add_model_specific_args(cls, group)
+
+    def __init__(
+        self,
+        n_layers: int = 2,
+        n_hidden: int = 32,
+        n_hidden_mlp: int = 128,
+        sigma: list[float] = [10.0],
+        max_filter_kernels: int = 25,
+        update_positions: bool = False,
+        deform: bool = False,
+        deform_tanh: bool = False,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.save_hyperparameters()
+
+        # hardcoded constants
+        pos_dim = 2
+        in_channels = self.input_length
+        out_channels = 2
+
+        self.n_layers = n_layers
+        self.nonlinearity = nn.GELU()
+        self.defomable = deform
+        self.deform_tanh = deform_tanh
+        # the filter radius is the distance in units of sigma for which we will compute the graph
+        self.filter_radius = 3 + max_filter_kernels ** (1 / pos_dim)
+
+        if isinstance(sigma, float):
+            self.sigma = [sigma] * n_layers
+        else:
+            self.sigma = sigma * n_layers if len(sigma) == 1 else sigma
+
+        self.readin = gnn.MLP(
+            [in_channels, n_hidden_mlp, n_hidden],
+            act=self.nonlinearity,
+            norm="batch_norm",
+            plain_last=False,
+        )
+        self.readout = gnn.MLP(
+            [n_hidden, n_hidden_mlp, out_channels],
+            act=self.nonlinearity,
+            norm="batch_norm",
+            plain_last=True,
+        )
+        self.conv = typing.cast(
+            typing.Sequence[TorchKernelConv],
+            nn.ModuleList(
+                [
+                    TorchKernelConv(
+                        max_filter_kernels,
+                        n_hidden,
+                        n_hidden,
+                        2,
+                        sigma=self.sigma[l],
+                        update_positions=update_positions,
+                    )
+                    for l in range(n_layers)
+                ]
+            ),
+        )
+        self.mlps = nn.ModuleList(
+            [
+                gnn.MLP(
+                    [
+                        n_hidden,
+                        n_hidden_mlp,
+                        n_hidden + pos_dim if deform else n_hidden,
+                    ],
+                    act=self.nonlinearity,
+                    norm="batch_norm",
+                    act_first=True,
+                    plain_last=True,
+                )
+                for _ in range(n_layers)
+            ]
+        )
+
+    def forward(self, x: Mixture) -> Mixture:
+        # we will use the same graph for all layers
+        x = x.map_weights(self.readin.forward)
+        for l in range(self.n_layers):
+            # residual connection
+            x_in = x
+            # perform KernelConvolution and sample at x.positions
+            # self.conv[l] is a message passing layer so we need a graph
+            assert x.batch is not None
+            batch_idx = torch.repeat_interleave(
+                torch.arange(
+                    len(x.batch),
+                    device=x.batch.device,
+                ),
+                x.batch,
+            )
+            edge_index = gnn.pool.radius_graph(
+                x.positions, self.filter_radius * self.sigma[l], batch_idx
+            )
+            x = Mixture(
+                x.positions,
+                self.conv[l].forward(x, edge_index),
+                x.batch,
+            )
+            x = x.map_weights(self.nonlinearity)
+            # residual connection
+            x = x.map_weights(x_in.weights.add)
+            # apply mlp
+            mlp_out = self.mlps[l].forward(x.weights)
+            delta_weights = mlp_out[..., : x.weights.shape[-1]]
+            # another residual connection
+            x = Mixture(
+                x.positions,
+                x.weights + delta_weights,
+                x.batch,
+            )
+            if self.defomable:
+                # we perturb the positions by the output of the mlp
+                delta_positions = mlp_out[..., x.weights.shape[-1] :]
+                if self.deform_tanh:
+                    delta_positions = delta_positions.tanh() * self.sigma[l] * 3
+                x = Mixture(
+                    x.positions + delta_positions,
+                    x.weights,
+                    x.batch,
+                )
+        x = x.map_weights(self.readout.forward)
+        x = x.map_weights(self.nonlinearity)
+        return x
+
+
 class KNN(RKHSBase):
     @classmethod
     def add_model_specific_args(cls, group):
@@ -550,7 +803,7 @@ class KNN(RKHSBase):
         update_positions: bool = False,
         sample_ratio: float = 1.0,
         alpha: float = 0,
-        deformable: bool = False,
+        deform: bool = False,
         deform_tanh: bool = False,
         **kwargs,
     ):
@@ -578,26 +831,168 @@ class KNN(RKHSBase):
             norm="batch_norm",
             plain_last=True,
         )
-        self.convolutions = nn.Sequential(
-            *[
-                KernelEncoderLayer(
-                    max_filter_kernels,
-                    n_hidden,
-                    n_hidden_mlp,
-                    self.sigma[l],
-                    update_positions,
-                    sample_ratio,
-                    alpha=alpha,
-                    deformable=deformable,
-                    deform_tanh=deform_tanh,
-                )
-                for l in range(n_layers)
+        self.convolutions = typing.cast(
+            typing.Sequence[KernelEncoderLayer],
+            nn.ModuleList(
+                [
+                    KernelEncoderLayer(
+                        max_filter_kernels,
+                        n_hidden,
+                        n_hidden_mlp,
+                        self.sigma[l],
+                        update_positions,
+                        sample_ratio,
+                        alpha=alpha,
+                        deform=deform,
+                        deform_tanh=deform_tanh,
+                    )
+                    for l in range(n_layers)
+                ]
+            ),
+        )
+
+    def forward(self, x: Mixture, cluster=False) -> Mixture:
+        x = x.map_weights(self.readin.forward)
+        for l in range(self.n_layers):
+            x = self.convolutions[l].forward(x, cluster=cluster)
+        x = x.map_weights(self.readout.forward)
+        x = x.map_weights(self.nonlinearity)
+        return x
+
+    def configure_optimizers(self):
+        # get all parameters that are KernelConv.kernel_positions
+        position_parameters = [
+            parameter
+            for name, parameter in self.named_parameters()
+            if "kernel_positions" in name
+        ]
+        # all other parameters
+        other_parameters = [
+            parameter
+            for name, parameter in self.named_parameters()
+            if "kernel_positions" not in name
+        ]
+        return torch.optim.AdamW(
+            [
+                {
+                    "params": other_parameters,
+                    "lr": self.learning_rate,
+                    "weight_decay": self.weight_decay,
+                },
+                # we don't want regularization on positions
+                # also learning rate is 10 times smaller
+                {
+                    "params": position_parameters,
+                    "lr": self.learning_rate * 0.1,
+                    "weight_decay": 0.0,
+                },
             ]
+        )
+
+
+class GNN(RKHSBase):
+    @classmethod
+    def add_model_specific_args(cls, group):
+        return add_model_specific_args(cls, group)
+
+    def __init__(
+        self,
+        n_layers: int = 2,
+        n_hidden: int = 32,
+        n_hidden_mlp: int = 128,
+        radius: list[float] = [10.0],
+        deform: bool = False,
+        deform_tanh: bool = False,
+        **kwargs,
+    ):
+        kwargs["solve_input"] = False
+        super().__init__(**kwargs)
+        self.save_hyperparameters()
+        if isinstance(radius, float):
+            self.radius = [radius] * n_layers
+        else:
+            self.radius = radius * n_layers if len(radius) == 1 else radius
+        self.n_layers = n_layers
+        self.nonlinearity = nn.GELU()
+        self.deform = deform
+        self.deform_tanh = deform_tanh
+
+        in_channels = self.input_length
+        pos_dim = 2  # number of positional dimensions
+        out_channels = 2  # weights
+
+        self.readin = gnn.MLP(
+            [in_channels, n_hidden_mlp, n_hidden],
+            act=self.nonlinearity,
+            norm="batch_norm",
+            plain_last=False,
+        )
+        self.readout = gnn.MLP(
+            [n_hidden, n_hidden_mlp, out_channels],
+            act=self.nonlinearity,
+            norm="batch_norm",
+            plain_last=True,
+        )
+        self.convolutions = typing.cast(
+            typing.Sequence[gnn.PointNetConv],
+            nn.ModuleList(
+                [
+                    gnn.PointNetConv(
+                        local_nn=gnn.MLP(
+                            [n_hidden + pos_dim, n_hidden_mlp, n_hidden],
+                            act=self.nonlinearity,
+                            norm="batch_norm",
+                        ),
+                        global_nn=gnn.MLP(
+                            [
+                                n_hidden,
+                                n_hidden_mlp,
+                                n_hidden + pos_dim if deform else n_hidden,
+                            ],
+                            act=self.nonlinearity,
+                            norm="batch_norm",
+                            plain_last=True,
+                        ),
+                    )
+                    for l in range(n_layers)
+                ]
+            ),
         )
 
     def forward(self, x: Mixture) -> Mixture:
         x = x.map_weights(self.readin.forward)
-        x = self.convolutions(x)
+        for l in range(self.n_layers):
+            if x.batch is None:
+                batch_idx = None
+            else:
+                batch_idx = torch.repeat_interleave(
+                    torch.arange(
+                        len(x.batch),
+                        device=x.batch.device,
+                    ),
+                    x.batch,
+                )
+            edge_index = gnn.pool.radius_graph(
+                x.positions, self.radius[l], batch_idx, loop=True
+            )
+            mlp_out = self.convolutions[l].forward(x.weights, x.positions, edge_index)
+            delta_weights = mlp_out[..., : x.weights.shape[-1]]
+            # residual connection
+            x = Mixture(
+                x.positions,
+                x.weights + delta_weights,
+                x.batch,
+            )
+            if self.deform:
+                # we perturb the positions by the output of the mlp
+                delta_positions = mlp_out[..., x.weights.shape[-1] :]
+                if self.deform_tanh:
+                    delta_positions = delta_positions.tanh() * self.radius[l]
+                x = Mixture(
+                    x.positions + delta_positions,
+                    x.weights,
+                    x.batch,
+                )
         x = x.map_weights(self.readout.forward)
         x = x.map_weights(self.nonlinearity)
         return x

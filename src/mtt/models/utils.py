@@ -62,6 +62,15 @@ def get_model_class(name: str):
         from mtt.models.egnn import EGNN
 
         return EGNN
+    elif name == "torchknn":
+        from mtt.models.kernel import TorchKNN
+
+        return TorchKNN
+
+    elif name == "gnn":
+        from mtt.models.kernel import GNN
+
+        return GNN
 
     else:
         raise ValueError(f"Unknown model: {name}.")
